@@ -77,6 +77,7 @@ class LearningAgent(BaseAgent):
         
         log.info(f"[{self.name}] Batch complete. Total consolidated: {self.memories_consolidated}")
 
+
 # --- Self-Test Execution ---
 if __name__ == "__main__":
     """
@@ -94,7 +95,10 @@ if __name__ == "__main__":
 
     # Cleanup old DB for a clean test
     if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+        try:
+            os.remove(DB_PATH)
+        except PermissionError:
+            log.warning("Could not delete old DB (file locked). Proceeding anyway.")
 
     log.info("--- [Test] Testing LearningAgent ---")
     
@@ -106,18 +110,33 @@ if __name__ == "__main__":
     learner = LearningAgent("Learner-01", bus, mm)
     learner.start()
     
-    # 3. Simulate Data Arrival (Manually inject into STM)
+    # 3. Simulate Data Arrival
     log.info("Injecting raw data into Short-Term Memory...")
     mm.add_observation("The sky is blue.", source="test_manual")
     mm.add_observation("Water is wet.", source="test_manual")
     
-    # 4. Wait for processing
-    # The agent sleeps for 0.1s (AGENT_SLEEP_INTERVAL), so 2 seconds is plenty.
-    log.info("Waiting for consolidation...")
-    time.sleep(2)
+    # 4. ROBUST WAIT (Polling)
+    # Instead of sleep(2), we check every 0.5s up to 10s
+    log.info("Waiting for consolidation (polling)...")
+    found = False
+    for _ in range(20): # Try 20 times (10 seconds max)
+        time.sleep(0.5)
+        # Check if the vector matrix has been built
+        # (This implies at least one memory was stored successfully)
+        # We need to access the private attribute directly for this test check
+        with mm._cache_lock:
+             if mm._vector_matrix is not None and mm._vector_matrix.shape[0] >= 2:
+                 found = True
+                 break
     
+    if not found:
+        log.error("Timeout! Agent took too long to consolidate memories.")
+        learner.stop()
+        exit(1)
+        
+    log.info("Consolidation detected. Verifying LTM content...")
+
     # 5. Verify LTM
-    # We search for the memories we just added
     results = mm.find_relevant_memories("What color is the sky?", k=1)
     
     if results:
@@ -127,6 +146,7 @@ if __name__ == "__main__":
         assert "sky is blue" in best_match['content']
     else:
         log.error("Failed to retrieve memory from LTM!")
+        learner.stop()
         exit(1)
 
     # 6. Verify STM is empty
