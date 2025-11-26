@@ -37,9 +37,10 @@ class LongTermMemory:
         Gets a thread-local database connection.
         """
         if not hasattr(self.local, 'connection'):
+            # FIX: Added | sqlite3.PARSE_COLNAMES to handle the "[NPARRAY]" syntax
             self.local.connection = sqlite3.connect(self.db_path, 
-                                                    detect_types=sqlite3.PARSE_DECLTYPES,
-                                                    check_same_thread=False) # We handle our own threading
+                                                    detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+                                                    check_same_thread=False)
             self.local.connection.row_factory = sqlite3.Row
         return self.local.connection
 
