@@ -17,7 +17,7 @@ from sns2f_framework.memory.memory_manager import MemoryManager
 from sns2f_framework.agents.perception_agent import PerceptionAgent
 from sns2f_framework.agents.learning_agent import LearningAgent
 from sns2f_framework.agents.reasoning_agent import ReasoningAgent
-
+from sns2f_framework.reasoning.concept_miner import ConceptMiner
 log = logging.getLogger(__name__)
 
 class Orchestrator:
@@ -102,3 +102,21 @@ class Orchestrator:
         """Internal handler to route the answer back to the CLI."""
         if self._response_callback:
             self._response_callback(response)
+
+    def consolidate_knowledge(self):
+        """
+        Triggers the Semantic Crystallization process.
+        """
+        log.info("Command: CONSOLIDATE KNOWLEDGE")
+        
+        # FIX: Pass the safe_generate method, NOT the raw self.reasoning_agent.llm object
+        safe_llm_func = self.reasoning_agent.safe_generate
+        
+        # Check if the agent is ready (has the method and the underlying model)
+        if not safe_llm_func or not self.reasoning_agent.llm:
+            log.warning("Cannot consolidate: Reasoning Brain is not online.")
+            return
+
+        miner = ConceptMiner(self.memory_manager, safe_llm_func)
+        count = miner.run_mining_cycle()
+        return count

@@ -98,3 +98,6 @@ EVENT_MEMORY_RETRIEVE = "memory:retrieve"
 # Reasoning Events
 EVENT_REASONING_QUERY = "reasoning:query"
 EVENT_REASONING_RESPONSE = "reasoning:response"
+
+EVENT_EXTRACT_FACTS = "learning:extract_facts"  # Payload: { "text": str, "source": str }
+EVENT_GAP_DETECTED = "learning:gap_detected"  # Payload: { "topic": str }

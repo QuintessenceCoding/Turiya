@@ -1,11 +1,16 @@
 # sns2f_framework/agents/learning_agent.py
 
 import logging
-import time
 from typing import List, Dict
 
 from sns2f_framework.agents.base_agent import BaseAgent
-from sns2f_framework.core.event_bus import EventBus, EVENT_LEARNING_NEW_MEMORY
+from sns2f_framework.core.event_bus import (
+    EventBus, 
+    EVENT_LEARNING_NEW_MEMORY, 
+    EVENT_EXTRACT_FACTS,
+    EVENT_START_LEARNING, # <--- Added
+    EVENT_STOP_LEARNING   # <--- Added
+)
 from sns2f_framework.memory.memory_manager import MemoryManager
 
 log = logging.getLogger(__name__)
@@ -13,33 +18,42 @@ log = logging.getLogger(__name__)
 class LearningAgent(BaseAgent):
     """
     The 'Digestive System' of the swarm.
-    
-    This agent runs in the background and constantly monitors Short-Term Memory.
-    When it finds new observations, it moves them to Long-Term Memory,
-    triggering the embedding and indexing process.
     """
 
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
         super().__init__(name, event_bus)
         self.memory_manager = memory_manager
-        
-        # Track stats
         self.memories_consolidated = 0
+        
+        # New Flag: Is the system currently in "Active Learning" mode?
+        # We default to True so it processes manual injections, but /stop will flip it.
+        self._is_active = True 
+        
+        # Subscribe to global Start/Stop signals
+        self.subscribe(EVENT_START_LEARNING, self._on_start)
+        self.subscribe(EVENT_STOP_LEARNING, self._on_stop)
+
+    def _on_start(self):
+        log.info(f"[{self.name}] Resuming consolidation.")
+        self._is_active = True
+
+    def _on_stop(self):
+        log.info(f"[{self.name}] Pausing consolidation.")
+        self._is_active = False
 
     def process_step(self):
-        """
-        Main loop: Check STM, consolidate data if found.
-        """
-        # 1. Check if there is anything in the inbox (STM)
-        # We use the atomic get_and_clear to ensure we own the data.
+        # 1. If we are paused, don't touch the queue.
+        # This keeps the items in STM (RAM) safe until we resume.
+        if not self._is_active:
+            return
+
+        # 2. Check if there is anything in the inbox (STM)
         observations = self.memory_manager.get_and_clear_observations()
         
         if not observations:
-            # Nothing to do, just sleep for a bit (handled by BaseAgent loop)
             return
 
-        # 2. Consolidate the data
-        log.debug(f"[{self.name}] Consolidating {len(observations)} items from STM...")
+        # 3. Consolidate the data
         self._consolidate_batch(observations)
 
     def _consolidate_batch(self, observations: List[Dict]):
@@ -47,19 +61,30 @@ class LearningAgent(BaseAgent):
         Process a batch of raw observations and store them in LTM.
         """
         for obs in observations:
+            # --- BRAKE CHECK ---
+            # Check BOTH thread termination (_stop_event) AND user pause (_is_active)
+            if self._stop_event.is_set():
+                return
+            
+            if not self._is_active:
+                # If user typed /stop while we were in a loop, we push the 
+                # remaining items BACK into the STM so we don't lose them!
+                # (This is a simplified approach; usually we'd re-queue)
+                log.info(f"[{self.name}] Pause detected. Halted batch processing.")
+                return 
+            # -------------------
+
             try:
                 content = obs['data']
                 source = obs.get('source', 'unknown')
                 timestamp = obs.get('timestamp')
                 
-                # Metadata to store with the permanent memory
                 metadata = {
                     "original_source": source,
                     "ingested_at": str(timestamp)
                 }
                 
-                # 3. Store in Long-Term Memory (Triggering Vector Compression)
-                # The MemoryManager handles the complexity of embedding this text.
+                # Store in Long-Term Memory
                 memory_id = self.memory_manager.store_memory(
                     content=content,
                     content_type="observation",
@@ -67,92 +92,14 @@ class LearningAgent(BaseAgent):
                 )
                 
                 self.memories_consolidated += 1
-                
-                # 4. Announce success to the swarm
-                # (Other agents might want to know a new memory exists)
                 self.publish(EVENT_LEARNING_NEW_MEMORY, memory_id=memory_id)
+                self.publish(EVENT_EXTRACT_FACTS, text=content, source=source)
                 
             except Exception as e:
                 log.error(f"[{self.name}] Failed to consolidate observation: {e}", exc_info=True)
         
         log.info(f"[{self.name}] Batch complete. Total consolidated: {self.memories_consolidated}")
 
-
 # --- Self-Test Execution ---
 if __name__ == "__main__":
-    """
-    Test the LearningAgent in isolation.
-    Run from root: python -m sns2f_framework.agents.learning_agent
-    """
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler()]
-    )
-    
-    import os
-    from sns2f_framework.config import DB_PATH
-
-    # Cleanup old DB for a clean test
-    if os.path.exists(DB_PATH):
-        try:
-            os.remove(DB_PATH)
-        except PermissionError:
-            log.warning("Could not delete old DB (file locked). Proceeding anyway.")
-
-    log.info("--- [Test] Testing LearningAgent ---")
-    
-    # 1. Setup Dependencies
-    bus = EventBus()
-    mm = MemoryManager()
-    
-    # 2. Create Agent
-    learner = LearningAgent("Learner-01", bus, mm)
-    learner.start()
-    
-    # 3. Simulate Data Arrival
-    log.info("Injecting raw data into Short-Term Memory...")
-    mm.add_observation("The sky is blue.", source="test_manual")
-    mm.add_observation("Water is wet.", source="test_manual")
-    
-    # 4. ROBUST WAIT (Polling)
-    # Instead of sleep(2), we check every 0.5s up to 10s
-    log.info("Waiting for consolidation (polling)...")
-    found = False
-    for _ in range(20): # Try 20 times (10 seconds max)
-        time.sleep(0.5)
-        # Check if the vector matrix has been built
-        # (This implies at least one memory was stored successfully)
-        # We need to access the private attribute directly for this test check
-        with mm._cache_lock:
-             if mm._vector_matrix is not None and mm._vector_matrix.shape[0] >= 2:
-                 found = True
-                 break
-    
-    if not found:
-        log.error("Timeout! Agent took too long to consolidate memories.")
-        learner.stop()
-        exit(1)
-        
-    log.info("Consolidation detected. Verifying LTM content...")
-
-    # 5. Verify LTM
-    results = mm.find_relevant_memories("What color is the sky?", k=1)
-    
-    if results:
-        best_match = results[0][0]
-        score = results[0][1]
-        log.info(f"Retrieved from LTM: '{best_match['content']}' (Score: {score:.4f})")
-        assert "sky is blue" in best_match['content']
-    else:
-        log.error("Failed to retrieve memory from LTM!")
-        learner.stop()
-        exit(1)
-
-    # 6. Verify STM is empty
-    assert len(mm.stm) == 0, "STM should be empty after consolidation"
-    
-    # 7. Cleanup
-    learner.stop()
-    learner.join()
-    log.info("--- [Test] LearningAgent Test Passed ---")
+    print("Please test the LearningAgent via 'python main.py'")

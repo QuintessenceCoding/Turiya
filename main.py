@@ -32,6 +32,7 @@ Commands:
   /stop    - Stop learning (consolidate only)
   /ask ... - Ask a question (e.g., /ask What is sparse activation?)
   /quit    - Shutdown and exit
+  /consolidate - Manually trigger knowledge consolidation
 --------------------------------------------
     """)
 
@@ -72,6 +73,14 @@ def main():
                     orc.ask(query, handle_response)
                 else:
                     print("[System]: Please provide a question.")
+
+            elif user_input.lower() == "/consolidate":
+                print("[System]: Mining concepts from raw facts...")
+                count = orc.consolidate_knowledge()
+                if count is not None:
+                    print(f"[System]: Crystallized {count} new concepts.")
+                else:
+                    print("[System]: Consolidation failed (check logs).")
             
             else:
                 print("[System]: Unknown command. Use /start, /stop, /ask, or /quit.")

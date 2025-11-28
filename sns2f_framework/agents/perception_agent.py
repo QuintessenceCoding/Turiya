@@ -3,10 +3,19 @@
 import logging
 import time
 import random
-from typing import Optional
-
+import requests
+from bs4 import BeautifulSoup
+from collections import deque
+from duckduckgo_search import DDGS
+from typing import List, Optional
 from sns2f_framework.agents.base_agent import BaseAgent
-from sns2f_framework.core.event_bus import EventBus, EVENT_START_LEARNING, EVENT_STOP_LEARNING, EVENT_PERCEPTION_NEW_DATA
+from sns2f_framework.core.event_bus import (
+    EventBus, 
+    EVENT_START_LEARNING, 
+    EVENT_STOP_LEARNING, 
+    EVENT_PERCEPTION_NEW_DATA,
+    EVENT_GAP_DETECTED # <--- New Event
+)
 from sns2f_framework.memory.memory_manager import MemoryManager
 from sns2f_framework.config import WHITELISTED_SOURCES
 
@@ -15,133 +24,121 @@ log = logging.getLogger(__name__)
 class PerceptionAgent(BaseAgent):
     """
     The 'Eyes' of the swarm.
-    
-    This agent monitors external data sources. When the system enters
-    'Learning Mode', it autonomously fetches content from whitelisted
-    sources and pushes it into the Short-Term Memory (STM).
+    V3 Upgrade: Curiosity-Driven.
+    It prioritizes searching for 'Knowledge Gaps' over random reading.
     """
 
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
         super().__init__(name, event_bus)
         self.memory_manager = memory_manager
-        
-        # State: Is the agent currently actively looking for info?
         self._is_learning = False
         
-        # Subscribe to global commands
+        # Priority Queue for things we are curious about
+        self.interest_queue = deque()
+        
         self.subscribe(EVENT_START_LEARNING, self._on_start_learning)
         self.subscribe(EVENT_STOP_LEARNING, self._on_stop_learning)
+        self.subscribe(EVENT_GAP_DETECTED, self._on_gap_detected)
 
     def _on_start_learning(self):
-        """Event handler: Wake up and start reading."""
-        log.info(f"[{self.name}] Received START_LEARNING command. Engaging sensors.")
+        log.info(f"[{self.name}] Engaging sensors.")
         self._is_learning = True
 
     def _on_stop_learning(self):
-        """Event handler: Stop reading."""
-        log.info(f"[{self.name}] Received STOP_LEARNING command. Idling.")
+        log.info(f"[{self.name}] Idling.")
         self._is_learning = False
 
-    def process_step(self):
+    def _on_gap_detected(self, topic: str):
         """
-        The main loop. If learning is active, fetch data and store it.
+        Triggered when the Brain is confused.
+        We add this topic to our high-priority search list.
         """
+        log.info(f"[{self.name}] Curiosity Triggered! Added '{topic}' to interest queue.")
+        self.interest_queue.append(topic)
+        
+        # If we aren't learning, we auto-start briefly to satisfy curiosity
         if not self._is_learning:
-            # If we aren't learning, just sleep and do nothing
+            log.info(f"[{self.name}] Auto-waking to investigate gap...")
+            self._is_learning = True
+            # We will naturally go back to sleep via main loop logic if needed,
+            # or user can stop. For now, we just wake up.
+
+    def process_step(self):
+        if not self._is_learning:
             return
 
-        # 1. Pick a source to 'read' from
-        source_url = self._pick_random_source()
+        url_to_scrape = None
         
-        # 2. Fetch the content (Simulated for this build)
-        content = self._fetch_content(source_url)
+        # 1. Check Priority Queue (Curiosity)
+        if self.interest_queue:
+            topic = self.interest_queue.popleft()
+            log.info(f"[{self.name}] Hunting info for gap: '{topic}'")
+            url_to_scrape = self._search_for_topic(topic)
         
-        if content:
-            # 3. Store raw data in Short-Term Memory
-            self.memory_manager.add_observation(content, source=source_url)
-            
-            # 4. Notify the swarm that new data is available
-            self.publish(EVENT_PERCEPTION_NEW_DATA, source=source_url)
-            
-            log.debug(f"[{self.name}] Ingested data from {source_url}")
-            
-            # 5. Artificial delay to simulate reading time and prevent spamming
-            time.sleep(1.5) 
+        # 2. If no priority, pick Random (Exploration)
+        if not url_to_scrape:
+             # Only explore randomly if the queue was empty
+             url_to_scrape = self._pick_random_source()
+             log.info(f"[{self.name}] Exploring random source: {url_to_scrape}")
+
+        # 3. Scrape
+        if url_to_scrape:
+            self._process_url(url_to_scrape)
+        
+        # Sleep to be polite
+        time.sleep(3.0)
+
+    def _search_for_topic(self, topic: str) -> str:
+        """
+        Uses DuckDuckGo to find a Wikipedia article for the topic.
+        """
+        try:
+            # We specifically look for wikipedia to keep quality high for now
+            query = f"{topic} site:en.wikipedia.org"
+            results = DDGS().text(query, max_results=1)
+            if results:
+                found_url = results[0]['href']
+                log.info(f"[{self.name}] Found source for '{topic}': {found_url}")
+                return found_url
+            else:
+                log.warning(f"[{self.name}] No results found for '{topic}'")
+                return None
+        except Exception as e:
+            log.error(f"[{self.name}] Search failed: {e}")
+            return None
 
     def _pick_random_source(self) -> str:
-        """Selects a random source from the whitelist."""
         if not WHITELISTED_SOURCES:
-            return "internal_simulation"
+            return "https://en.wikipedia.org/wiki/Artificial_intelligence"
         return random.choice(WHITELISTED_SOURCES)
 
-    def _fetch_content(self, url: str) -> str:
-        """
-        Simulates reading content from a URL.
-        
-        In a production V2, this would use `requests.get(url)`.
-        For now, we generate relevant synthetic text to test the pipeline.
-        """
-        # A small dictionary of "knowledge" to simulate reading different sites
-        simulated_knowledge = [
-            "Neuro-symbolic AI combines neural networks' pattern recognition with symbolic logic's reasoning.",
-            "Sparse activation reduces computational cost by only using relevant neurons for a task.",
-            "The event bus allows asynchronous communication between decoupled agents.",
-            "Long-term memory consolidation involves compressing episodic memories into semantic facts.",
-            "Swarm intelligence emerges from the interaction of many simple agents.",
-            "Latent representations allow complex data to be stored as compact vectors.",
-            "Plasticity in AI refers to the ability to rewire connections based on new data."
-        ]
-        
-        # Return a random "fact" simulating a sentence read from a webpage
-        return random.choice(simulated_knowledge)
+    def _process_url(self, url: str):
+        observations = self._scrape_url(url)
+        if observations:
+            log.info(f"[{self.name}] Extracted {len(observations)} chunks.")
+            for text_chunk in observations:
+                if not self._is_learning: break
+                self.memory_manager.add_observation(text_chunk, source=url)
+                self.publish(EVENT_PERCEPTION_NEW_DATA, source=url)
+                time.sleep(0.5)
 
-# --- Self-Test Execution ---
-if __name__ == "__main__":
-    """
-    Test the PerceptionAgent in isolation.
-    Run from root: python -m sns2f_framework.agents.perception_agent
-    """
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler()]
-    )
+    def _scrape_url(self, url: str) -> List[str]:
+        try:
+            headers = {'User-Agent': 'SNS2F-Bot/0.1 (Internal Research)'}
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code != 200: return []
 
-    log.info("--- [Test] Testing PerceptionAgent ---")
-    
-    # 1. Setup Dependencies
-    bus = EventBus()
-    mm = MemoryManager()
-    
-    # 2. Create Agent
-    agent = PerceptionAgent("Perception-01", bus, mm)
-    agent.start()
-    
-    # 3. Test: Agent should be idle initially
-    log.info("Agent started. Waiting 1 second (should be idle)...")
-    time.sleep(1)
-    # Check STM (should be empty)
-    assert len(mm.stm) == 0, "STM should be empty before learning starts"
-    
-    # 4. Test: Start Learning
-    log.info(">>> sending START_LEARNING event")
-    bus.publish(EVENT_START_LEARNING)
-    
-    # Let it run for 4 seconds (should read ~2 items)
-    time.sleep(4)
-    
-    # 5. Test: Stop Learning
-    log.info(">>> sending STOP_LEARNING event")
-    bus.publish(EVENT_STOP_LEARNING)
-    
-    # 6. Verify Results
-    items = mm.get_and_clear_observations()
-    log.info(f"Items captured in STM: {len(items)}")
-    
-    assert len(items) > 0, "Agent failed to capture data during learning mode"
-    log.info(f"Sample data: {items[0]}")
-    
-    # 7. Cleanup
-    agent.stop()
-    agent.join()
-    log.info("--- [Test] PerceptionAgent Test Passed ---")
+            soup = BeautifulSoup(response.content, 'html.parser')
+            paragraphs = soup.find_all('p')
+            
+            cleaned = []
+            for p in paragraphs:
+                text = p.get_text().strip()
+                if len(text) > 60: cleaned.append(text)
+            
+            # Deep read (20 paragraphs)
+            return cleaned[:20]
+
+        except Exception as e:
+            log.error(f"Scraping error: {e}")
+            return []
