@@ -45,6 +45,46 @@ WHITELISTED_SOURCES = [
     "https://www.holy-bhagavad-gita.org/chapter/17/",
     "https://www.holy-bhagavad-gita.org/chapter/18/",
     "https://www.himalayanacademy.com/book-reader/?book=/media/books/what-is-hinduism/what-is-hinduism.epub",
+    "https://en.wikipedia.org/wiki/Special:Random",  # The classic random button
+    "https://longreads.com/", # High quality journalism
+    "https://aeon.co/" ,
+           # Python Documentation (Structure and syntax)
+    "https://docs.python.org/3/tutorial/index.html",
+    "https://docs.python.org/3/library/index.html",
+    
+    # MDN Web Docs (Concepts of web and logic)
+    "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide",
+    
+    # Real Python (Tutorial style, good for "How-to")
+    "https://realpython.com/",   # Deep thinking essays
+    # NASA (Clean text, high authority)
+    "https://science.nasa.gov/universe/",
+    "https://science.nasa.gov/solar-system/",
+    
+    # Nature Scitable (Education focused biology/genetics)
+    "https://www.nature.com/scitable/topicpage/dna-replication-and-causes-of-mutation-409/",
+    
+    # Phys.org (Physics news and concepts)
+    "https://phys.org/physics-news/",
+    # Stanford Encyclopedia of Philosophy (The gold standard for logic)
+    "https://plato.stanford.edu/entries/logic-ai/",
+    "https://plato.stanford.edu/entries/reasoning-automated/",
+    "https://plato.stanford.edu/entries/ethics-ai/",
+    "https://plato.stanford.edu/entries/consciousness/",
+    
+    # Internet Encyclopedia of Philosophy
+    "https://iep.utm.edu/category/science/",
+    "https://iep.utm.edu/category/mind-and-cognitive-science/",
+    # Wikipedia Portals (Better than random pages, focuses on core topics)
+    "https://en.wikipedia.org/wiki/Portal:Science",
+    "https://en.wikipedia.org/wiki/Portal:History",
+    "https://en.wikipedia.org/wiki/Portal:Technology",
+    "https://en.wikipedia.org/wiki/Portal:Mathematics",
+    "https://en.wikipedia.org/wiki/Portal:Philosophy",
+    
+    # Britannica (High quality, concise)
+    "https://www.britannica.com/topic/artificial-intelligence",
+    "https://www.britannica.com/technology/computer-science"
 ]
 
 # --- Memory ---

@@ -141,3 +141,18 @@ class MemoryManager:
                 if data:
                     results.append((dict(data), score))
             return results
+        
+    def perform_sleep_maintenance(self) -> int:
+        """
+        Runs the biological cleanup process.
+        """
+        log.info("Entering REM sleep... optimizing memory.")
+        
+        # 1. Prune unused memories (Aggressive: delete anything never accessed)
+        # In a real app, you'd use a timestamp threshold.
+        deleted_count = self.ltm.prune_memories(days_unused=0)
+        
+        # 2. Rebuild caches immediately to reflect the smaller DB
+        self._load_caches()
+        
+        return deleted_count

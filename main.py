@@ -26,6 +26,8 @@ except ImportError as e:
     sys.exit(1)
 
 def print_banner():
+    # Clear screen command (optional, makes it cleaner)
+    # print("\033[H\033[J", end="") 
     print(r"""
    _____   _   __  _____   ___    _____ 
   / ___/  / | / / / ___/  |__ \  / ___/ 
@@ -56,8 +58,9 @@ def main():
     print("--- Starting Agents ---")
     orc.start()
     
-    # Give threads a moment to spin up so logs don't clobber the banner
-    time.sleep(0.5)
+    print("--- Waiting for Neural Engine (2s) ---")
+    # Increased wait time to let the LLM load cleanly before we take over the screen
+    time.sleep(2.0)
     
     print_banner()
     
@@ -102,6 +105,12 @@ def main():
                     orc.ask(query, handle_response, request_id=last_req_id)
                 else:
                     print("[System]: Ask what?")
+            
+            elif user_input.lower() == "/sleep":
+                print("[System]: Initiating Sleep Cycle (Memory Pruning)...")
+                deleted = orc.sleep_cycle()
+                print(f"[System]: Woke up. Forgot {deleted} unused memories.")
+            
             else:
                 print("[System]: Unknown command.")
 

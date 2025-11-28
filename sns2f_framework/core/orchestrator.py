@@ -33,7 +33,7 @@ class Orchestrator:
 
     def start(self):
         for agent in self.agents: agent.start()
-        log.info("System is live.") # Updated log message
+        log.info("System is live.")
 
     def stop(self):
         self.bus.publish(EVENT_SYSTEM_SHUTDOWN)
@@ -53,19 +53,24 @@ class Orchestrator:
         miner = ConceptMiner(self.memory_manager, safe_llm_func)
         return miner.run_mining_cycle()
 
-    # --- UPDATED ASK METHOD ---
+    # --- NEW: SLEEP CYCLE ---
+    def sleep_cycle(self):
+        """
+        Triggers the sleep/maintenance phase.
+        """
+        log.info("Command: SLEEP CYCLE")
+        # Ensure we aren't eating while sleeping
+        self.stop_learning() 
+        
+        deleted = self.memory_manager.perform_sleep_maintenance()
+        return deleted
+
     def ask(self, question: str, callback: Callable, request_id: str = None):
-        """
-        Submits a query. Accepts an optional request_id for tracing.
-        """
         if not request_id:
             request_id = str(uuid.uuid4())
             
         self._response_callback = callback
-        
-        # Log to trace
         trace_manager.record(request_id, "Orchestrator", "Query Submitted", question)
-        
         log.info(f"Command: ASK '{question}' (ID: {request_id})")
         self.bus.publish(EVENT_REASONING_QUERY, query_text=question, request_id=request_id)
 
