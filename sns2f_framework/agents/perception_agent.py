@@ -6,26 +6,27 @@ import random
 import requests
 from bs4 import BeautifulSoup
 from collections import deque
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from typing import List, Optional
+
 from sns2f_framework.agents.base_agent import BaseAgent
 from sns2f_framework.core.event_bus import (
     EventBus, 
     EVENT_START_LEARNING, 
     EVENT_STOP_LEARNING, 
     EVENT_PERCEPTION_NEW_DATA,
-    EVENT_GAP_DETECTED # <--- New Event
+    EVENT_GAP_DETECTED
 )
 from sns2f_framework.memory.memory_manager import MemoryManager
 from sns2f_framework.config import WHITELISTED_SOURCES
+from sns2f_framework.core.trace_manager import trace_manager
 
 log = logging.getLogger(__name__)
 
 class PerceptionAgent(BaseAgent):
     """
     The 'Eyes' of the swarm.
-    V3 Upgrade: Curiosity-Driven.
-    It prioritizes searching for 'Knowledge Gaps' over random reading.
+    V3 Upgrade: Curiosity-Driven + Introspection Tracing.
     """
 
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
@@ -33,7 +34,7 @@ class PerceptionAgent(BaseAgent):
         self.memory_manager = memory_manager
         self._is_learning = False
         
-        # Priority Queue for things we are curious about
+        # Priority Queue stores tuples: (topic, request_id)
         self.interest_queue = deque()
         
         self.subscribe(EVENT_START_LEARNING, self._on_start_learning)
@@ -48,44 +49,56 @@ class PerceptionAgent(BaseAgent):
         log.info(f"[{self.name}] Idling.")
         self._is_learning = False
 
-    def _on_gap_detected(self, topic: str):
+    def _on_gap_detected(self, topic: str, request_id: str = None):
         """
         Triggered when the Brain is confused.
         We add this topic to our high-priority search list.
         """
-        log.info(f"[{self.name}] Curiosity Triggered! Added '{topic}' to interest queue.")
-        self.interest_queue.append(topic)
+        # 1. Record the decision to hunt
+        trace_manager.record(request_id, self.name, "Gap Investigation Started", f"Hunting for: {topic}")
         
-        # If we aren't learning, we auto-start briefly to satisfy curiosity
+        log.info(f"[{self.name}] Curiosity Triggered! Added '{topic}' to interest queue.")
+        
+        # 2. Store BOTH topic and ID so we can trace the search later
+        self.interest_queue.append((topic, request_id))
+        
         if not self._is_learning:
             log.info(f"[{self.name}] Auto-waking to investigate gap...")
             self._is_learning = True
-            # We will naturally go back to sleep via main loop logic if needed,
-            # or user can stop. For now, we just wake up.
 
     def process_step(self):
         if not self._is_learning:
             return
 
         url_to_scrape = None
-        
+        current_request_id = None # Track ID for this specific step
+
         # 1. Check Priority Queue (Curiosity)
         if self.interest_queue:
-            topic = self.interest_queue.popleft()
+            # Unpack the tuple we stored
+            topic, req_id = self.interest_queue.popleft()
+            current_request_id = req_id
+            
             log.info(f"[{self.name}] Hunting info for gap: '{topic}'")
+            
+            # Trace the Search Action
+            trace_manager.record(current_request_id, self.name, "Web Search", f"Searching DDG for {topic}")
+            
             url_to_scrape = self._search_for_topic(topic)
         
         # 2. If no priority, pick Random (Exploration)
         if not url_to_scrape:
-             # Only explore randomly if the queue was empty
              url_to_scrape = self._pick_random_source()
              log.info(f"[{self.name}] Exploring random source: {url_to_scrape}")
 
         # 3. Scrape
         if url_to_scrape:
+            # Trace the Scrape Action (if linked to a request)
+            if current_request_id:
+                trace_manager.record(current_request_id, self.name, "Scraping", f"Reading {url_to_scrape}")
+                
             self._process_url(url_to_scrape)
         
-        # Sleep to be polite
         time.sleep(3.0)
 
     def _search_for_topic(self, topic: str) -> str:
@@ -93,8 +106,8 @@ class PerceptionAgent(BaseAgent):
         Uses DuckDuckGo to find a Wikipedia article for the topic.
         """
         try:
-            # We specifically look for wikipedia to keep quality high for now
             query = f"{topic} site:en.wikipedia.org"
+            # Note: Ensure you have `duckduckgo-search` installed
             results = DDGS().text(query, max_results=1)
             if results:
                 found_url = results[0]['href']
@@ -136,7 +149,6 @@ class PerceptionAgent(BaseAgent):
                 text = p.get_text().strip()
                 if len(text) > 60: cleaned.append(text)
             
-            # Deep read (20 paragraphs)
             return cleaned[:20]
 
         except Exception as e:

@@ -25,7 +25,26 @@ WHITELISTED_SOURCES = [
     "https://en.wikipedia.org/wiki/Artificial_neural_network",
     "https://en.wikipedia.org/wiki/Knowledge_graph",
     "https://en.wikipedia.org/wiki/Ant",
-    "https://en.wikipedia.org/wiki/Stigmergy"
+    "https://en.wikipedia.org/wiki/Stigmergy",
+    "https://www.holy-bhagavad-gita.org/chapter/1/",
+    "https://www.holy-bhagavad-gita.org/chapter/2/",
+    "https://www.holy-bhagavad-gita.org/chapter/3/",
+    "https://www.holy-bhagavad-gita.org/chapter/4/",
+    "https://www.holy-bhagavad-gita.org/chapter/5/",
+    "https://www.holy-bhagavad-gita.org/chapter/6/",
+    "https://www.holy-bhagavad-gita.org/chapter/7/",
+    "https://www.holy-bhagavad-gita.org/chapter/8/",
+    "https://www.holy-bhagavad-gita.org/chapter/9/",
+    "https://www.holy-bhagavad-gita.org/chapter/10/",
+    "https://www.holy-bhagavad-gita.org/chapter/11/",
+    "https://www.holy-bhagavad-gita.org/chapter/12/",
+    "https://www.holy-bhagavad-gita.org/chapter/13/",
+    "https://www.holy-bhagavad-gita.org/chapter/14/",
+    "https://www.holy-bhagavad-gita.org/chapter/15/",
+    "https://www.holy-bhagavad-gita.org/chapter/16/",
+    "https://www.holy-bhagavad-gita.org/chapter/17/",
+    "https://www.holy-bhagavad-gita.org/chapter/18/",
+    "https://www.himalayanacademy.com/book-reader/?book=/media/books/what-is-hinduism/what-is-hinduism.epub",
 ]
 
 # --- Memory ---

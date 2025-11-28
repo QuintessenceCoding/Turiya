@@ -1,122 +1,74 @@
 # sns2f_framework/core/orchestrator.py
 
 import logging
-import time
 import uuid
 from typing import Callable, Optional
 
 from sns2f_framework.core.event_bus import (
-    EventBus, 
-    EVENT_START_LEARNING, 
-    EVENT_STOP_LEARNING, 
-    EVENT_REASONING_QUERY, 
-    EVENT_REASONING_RESPONSE,
-    EVENT_SYSTEM_SHUTDOWN
+    EventBus, EVENT_START_LEARNING, EVENT_STOP_LEARNING, 
+    EVENT_REASONING_QUERY, EVENT_REASONING_RESPONSE, EVENT_SYSTEM_SHUTDOWN
 )
 from sns2f_framework.memory.memory_manager import MemoryManager
 from sns2f_framework.agents.perception_agent import PerceptionAgent
 from sns2f_framework.agents.learning_agent import LearningAgent
 from sns2f_framework.agents.reasoning_agent import ReasoningAgent
 from sns2f_framework.reasoning.concept_miner import ConceptMiner
+from sns2f_framework.core.trace_manager import trace_manager
+
 log = logging.getLogger(__name__)
 
 class Orchestrator:
-    """
-    The main controller for the SNS²F system.
-    
-    It initializes the infrastructure (EventBus, Memory) and the Swarm (Agents).
-    It exposes high-level methods to control the system from the CLI.
-    """
-
     def __init__(self):
         log.info("Booting SNS²F Orchestrator...")
-        
-        # 1. Initialize Infrastructure
         self.bus = EventBus()
         self.memory_manager = MemoryManager()
         
-        # 2. Initialize Agents
-        # We pass the bus and memory manager to them so they are connected.
         self.perception_agent = PerceptionAgent("Perception", self.bus, self.memory_manager)
         self.learning_agent = LearningAgent("Learning", self.bus, self.memory_manager)
         self.reasoning_agent = ReasoningAgent("Reasoning", self.bus, self.memory_manager)
         
-        self.agents = [
-            self.perception_agent,
-            self.learning_agent,
-            self.reasoning_agent
-        ]
-        
-        # Callback for handling answers coming back from the reasoning agent
+        self.agents = [self.perception_agent, self.learning_agent, self.reasoning_agent]
         self._response_callback: Optional[Callable] = None
         self.bus.subscribe(EVENT_REASONING_RESPONSE, self._handle_reasoning_response)
 
     def start(self):
-        """Starts all agents in the swarm."""
-        log.info("Starting swarm agents...")
-        for agent in self.agents:
-            agent.start()
-        log.info("System is live and ready.")
+        for agent in self.agents: agent.start()
+        log.info("System is live.") # Updated log message
 
     def stop(self):
-        """Stops all agents and shuts down the system."""
-        log.info("Shutting down system...")
         self.bus.publish(EVENT_SYSTEM_SHUTDOWN)
-        
-        for agent in self.agents:
-            agent.stop()
-            
-        # Wait for threads to finish
-        for agent in self.agents:
-            agent.join()
-        
-        log.info("System shutdown complete.")
-
-    # --- High-Level Commands ---
+        for agent in self.agents: agent.stop()
+        for agent in self.agents: agent.join()
 
     def start_learning(self):
-        """Signals the swarm to begin active learning (Perception)."""
-        log.info("Command: START LEARNING")
         self.bus.publish(EVENT_START_LEARNING)
 
     def stop_learning(self):
-        """Signals the swarm to stop active learning."""
-        log.info("Command: STOP LEARNING")
         self.bus.publish(EVENT_STOP_LEARNING)
 
-    def ask(self, question: str, callback: Callable):
+    def consolidate_knowledge(self):
+        safe_llm_func = self.reasoning_agent.safe_generate
+        if not safe_llm_func or not self.reasoning_agent.llm:
+            return None
+        miner = ConceptMiner(self.memory_manager, safe_llm_func)
+        return miner.run_mining_cycle()
+
+    # --- UPDATED ASK METHOD ---
+    def ask(self, question: str, callback: Callable, request_id: str = None):
         """
-        Submits a query to the reasoning agent.
-        
-        Args:
-            question: The text query.
-            callback: A function to call when the answer is ready.
+        Submits a query. Accepts an optional request_id for tracing.
         """
-        request_id = str(uuid.uuid4())
+        if not request_id:
+            request_id = str(uuid.uuid4())
+            
         self._response_callback = callback
+        
+        # Log to trace
+        trace_manager.record(request_id, "Orchestrator", "Query Submitted", question)
         
         log.info(f"Command: ASK '{question}' (ID: {request_id})")
         self.bus.publish(EVENT_REASONING_QUERY, query_text=question, request_id=request_id)
 
     def _handle_reasoning_response(self, request_id: str, response: str):
-        """Internal handler to route the answer back to the CLI."""
         if self._response_callback:
             self._response_callback(response)
-
-    def consolidate_knowledge(self):
-        """
-        Triggers the Semantic Crystallization process.
-        """
-        log.info("Command: CONSOLIDATE KNOWLEDGE")
-        
-        # FIX: Pass the safe_generate method, NOT the raw self.reasoning_agent.llm object
-        safe_llm_func = self.reasoning_agent.safe_generate
-        
-        # Check if the agent is ready (has the method and the underlying model)
-        if not safe_llm_func or not self.reasoning_agent.llm:
-            log.warning("Cannot consolidate: Reasoning Brain is not online.")
-            return
-
-        miner = ConceptMiner(self.memory_manager, safe_llm_func)
-        count = miner.run_mining_cycle()
-        return count

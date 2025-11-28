@@ -2,19 +2,28 @@
 
 import logging
 import sys
+import uuid
+import warnings
 import time
-import threading
 
-# Configure Logging (Clean output for the CLI)
-# We set the level to INFO to suppress the noisy DEBUG logs during normal use.
+# Suppress the SQLite date warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Configure Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     datefmt='%H:%M:%S'
 )
 
-# Import the Orchestrator
-from sns2f_framework.core.orchestrator import Orchestrator
+# Imports
+try:
+    from sns2f_framework.core.orchestrator import Orchestrator
+    from sns2f_framework.core.trace_manager import trace_manager
+except ImportError as e:
+    print(f"\n[CRITICAL] Import Error: {e}")
+    print("Are you running this from the D:\\Code\\Turiya directory?")
+    sys.exit(1)
 
 def print_banner():
     print(r"""
@@ -25,34 +34,42 @@ def print_banner():
 /____/ /_/ |_/  /____/  /____/ /_/      
                                         
 Self-Evolving Neuro-Symbolic Swarm Framework
-v0.1 - "Genesis"
+v2.1 - "Conversational"
 --------------------------------------------
 Commands:
-  /start   - Start autonomous learning (read from sources)
-  /stop    - Stop learning (consolidate only)
-  /ask ... - Ask a question (e.g., /ask What is sparse activation?)
-  /quit    - Shutdown and exit
-  /consolidate - Manually trigger knowledge consolidation
+  /start   - Start autonomous learning
+  /stop    - Stop learning
+  /ask ... - Ask a question
+  /trace   - Show the thought process
+  /consolidate - Crystallize concepts
+  /quit    - Exit
 --------------------------------------------
-    """)
+    """, flush=True)
 
 def handle_response(response_text: str):
-    """Callback to print the AI's answer."""
     print(f"\n[🤖 AI]: {response_text}\n>> ", end="", flush=True)
 
 def main():
+    print("--- Initializing System ---")
     orc = Orchestrator()
+    
+    print("--- Starting Agents ---")
     orc.start()
+    
+    # Give threads a moment to spin up so logs don't clobber the banner
+    time.sleep(0.5)
     
     print_banner()
     
+    last_req_id = None
+
     try:
         while True:
-            # We use a simple input loop
+            # Force flush to ensure the prompt is visible
+            sys.stdout.flush()
             user_input = input(">> ").strip()
             
-            if not user_input:
-                continue
+            if not user_input: continue
                 
             if user_input.lower() == "/quit":
                 print("Exiting...")
@@ -60,34 +77,40 @@ def main():
                 
             elif user_input.lower() == "/start":
                 orc.start_learning()
-                print("[System]: Swarm is now learning from sources...")
+                print("[System]: Swarm is now learning...")
                 
             elif user_input.lower() == "/stop":
                 orc.stop_learning()
-                print("[System]: Learning paused. Consolidating memories...")
-                
+                print("[System]: Learning paused.")
+
+            elif user_input.lower() == "/consolidate":
+                print("[System]: Mining concepts...")
+                count = orc.consolidate_knowledge()
+                print(f"[System]: Crystallized {count} concepts.")
+
+            elif user_input.lower() == "/trace":
+                if last_req_id:
+                    print(trace_manager.get_trace(last_req_id))
+                else:
+                    print("[System]: No history available.")
+            
             elif user_input.lower().startswith("/ask"):
                 query = user_input[5:].strip()
                 if query:
+                    last_req_id = str(uuid.uuid4())
                     print(f"[System]: Thinking...")
-                    orc.ask(query, handle_response)
+                    orc.ask(query, handle_response, request_id=last_req_id)
                 else:
-                    print("[System]: Please provide a question.")
-
-            elif user_input.lower() == "/consolidate":
-                print("[System]: Mining concepts from raw facts...")
-                count = orc.consolidate_knowledge()
-                if count is not None:
-                    print(f"[System]: Crystallized {count} new concepts.")
-                else:
-                    print("[System]: Consolidation failed (check logs).")
-            
+                    print("[System]: Ask what?")
             else:
-                print("[System]: Unknown command. Use /start, /stop, /ask, or /quit.")
+                print("[System]: Unknown command.")
 
     except KeyboardInterrupt:
-        print("\n[System]: Force quit detected.")
+        print("\n[System]: Force quit.")
+    except Exception as e:
+        print(f"\n[CRITICAL ERROR]: {e}")
     finally:
+        print("--- Stopping Orchestrator ---")
         orc.stop()
         sys.exit(0)
 
