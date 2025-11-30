@@ -13,6 +13,7 @@ from sns2f_framework.agents.perception_agent import PerceptionAgent
 from sns2f_framework.agents.learning_agent import LearningAgent
 from sns2f_framework.agents.reasoning_agent import ReasoningAgent
 from sns2f_framework.reasoning.concept_miner import ConceptMiner
+from sns2f_framework.reasoning.consolidator import Consolidator
 from sns2f_framework.core.trace_manager import trace_manager
 
 log = logging.getLogger(__name__)
@@ -47,23 +48,26 @@ class Orchestrator:
         self.bus.publish(EVENT_STOP_LEARNING)
 
     def consolidate_knowledge(self):
-        safe_llm_func = self.reasoning_agent.safe_generate
-        if not safe_llm_func or not self.reasoning_agent.llm:
-            return None
-        miner = ConceptMiner(self.memory_manager, safe_llm_func)
-        return miner.run_mining_cycle()
-
-    # --- NEW: SLEEP CYCLE ---
-    def sleep_cycle(self):
         """
-        Triggers the sleep/maintenance phase.
+        Triggers the Concept Evolution Cycle.
+        V4 Update: Enabled for Symbolic Mode (No LLM needed).
         """
-        log.info("Command: SLEEP CYCLE")
-        # Ensure we aren't eating while sleeping
-        self.stop_learning() 
+        log.info("Command: CONSOLIDATE KNOWLEDGE")
+        # Initialize Miner without LLM (it uses symbolic synthesis now)
+        miner = ConceptMiner(self.memory_manager)
+        count = miner.run_mining_cycle()
         
-        deleted = self.memory_manager.perform_sleep_maintenance()
-        return deleted
+        # Reload caches so the Reasoning Agent sees the new concepts immediately
+        self.memory_manager._load_caches()
+        
+        return count
+
+    def sleep_cycle(self):
+        log.info("Command: SLEEP CYCLE")
+        self.stop_learning()
+        janitor = Consolidator(self.memory_manager)
+        stats = janitor.run_sleep_cycle()
+        return stats
 
     def ask(self, question: str, callback: Callable, request_id: str = None):
         if not request_id:

@@ -44,6 +44,7 @@ Commands:
   /ask ... - Ask a question
   /trace   - Show the thought process
   /consolidate - Crystallize concepts
+  /sleep   - Perform maintenance cycle
   /quit    - Exit
 --------------------------------------------
     """, flush=True)
@@ -60,7 +61,7 @@ def main():
     
     print("--- Waiting for Neural Engine (2s) ---")
     # Increased wait time to let the LLM load cleanly before we take over the screen
-    time.sleep(2.0)
+    time.sleep(5.0)
     
     print_banner()
     
@@ -107,9 +108,11 @@ def main():
                     print("[System]: Ask what?")
             
             elif user_input.lower() == "/sleep":
-                print("[System]: Initiating Sleep Cycle (Memory Pruning)...")
-                deleted = orc.sleep_cycle()
-                print(f"[System]: Woke up. Forgot {deleted} unused memories.")
+                print("[System]: Initiating Sleep Cycle...")
+                stats = orc.sleep_cycle()
+                print(f"[System]: Sleep Complete.\n   - Noise Deleted: {stats['deleted_noise']}\n   - Duplicates Merged: {stats['merged_duplicates']}\n   - Concepts Formed: {stats['concepts_formed']}")
+
+            
             
             else:
                 print("[System]: Unknown command.")

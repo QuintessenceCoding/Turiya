@@ -2,8 +2,8 @@
 
 import logging
 import os
-import json
 import threading
+import json
 import re
 from collections import deque
 from typing import Dict, Any, List
@@ -13,33 +13,39 @@ from llama_cpp import Llama
 
 from sns2f_framework.agents.base_agent import BaseAgent
 from sns2f_framework.core.event_bus import (
-    EventBus, 
-    EVENT_REASONING_QUERY, 
-    EVENT_REASONING_RESPONSE,
-    EVENT_EXTRACT_FACTS,
-    EVENT_GAP_DETECTED
+    EventBus, EVENT_REASONING_QUERY, EVENT_REASONING_RESPONSE,
+    EVENT_EXTRACT_FACTS, EVENT_GAP_DETECTED
 )
 from sns2f_framework.memory.memory_manager import MemoryManager
+from sns2f_framework.tools.code_executor import CodeExecutor
+from sns2f_framework.core.trace_manager import trace_manager
+from sns2f_framework.core.language_engine import LanguageEngine
+from sns2f_framework.core.language_generator import LanguageGenerator
 from sns2f_framework.config import MODEL_DIR, MODEL_REPO, MODEL_FILENAME
 from sns2f_framework.reasoning.symbolic_engine import SymbolicEngine
 from sns2f_framework.core.self_monitor import SelfMonitor 
-from sns2f_framework.tools.code_executor import CodeExecutor
-from sns2f_framework.core.trace_manager import trace_manager
 
 log = logging.getLogger(__name__)
 
 class ReasoningAgent(BaseAgent):
     """
-    The Generative Brain of the swarm.
-    V2.3: Hardened Math Mode & History Hygiene.
+    The Hybrid Brain (V7.0: Self-Aware).
+    Records its own actions into the Knowledge Graph to build an identity.
     """
 
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
         super().__init__(name, event_bus)
         self.memory_manager = memory_manager
+        
+        # Engines
+        self.lang_engine = LanguageEngine()
+        self.lang_gen = LanguageGenerator(memory_manager) 
         self.self_monitor = SelfMonitor(memory_manager)
-        self.chat_history = deque(maxlen=6) 
+        
+        # Context
+        self.chat_history = deque(maxlen=6)
 
+        # Neural Engine
         self.llm: Llama = None
         self._model_path = os.path.join(MODEL_DIR, MODEL_FILENAME)
         self.llm_lock = threading.Lock()
@@ -48,183 +54,167 @@ class ReasoningAgent(BaseAgent):
         self.subscribe(EVENT_EXTRACT_FACTS, self._on_extract_facts)
 
     def setup(self):
+        log.info(f"[{self.name}] Booting Hybrid Core...")
         self._ensure_model_exists()
         self._load_model()
-
-    def process_step(self): pass
+        
+        # --- NEW: Initialize Self-Concept ---
+        # We ensure "Turiya" exists as a subject in the graph
+        self._update_self_model("is", "an Artificial Intelligence")
+        self._update_self_model("runs on", "Local Hardware")
 
     def safe_generate(self, *args, **kwargs):
-        if not self.llm: raise RuntimeError("LLM not loaded")
+        if not self.llm: return None
         with self.llm_lock: return self.llm(*args, **kwargs)
 
     def _ensure_model_exists(self):
         if not os.path.exists(self._model_path):
+            log.warning(f"[{self.name}] Downloading Neural Engine...")
             os.makedirs(MODEL_DIR, exist_ok=True)
             try: hf_hub_download(repo_id=MODEL_REPO, filename=MODEL_FILENAME, local_dir=MODEL_DIR, local_dir_use_symlinks=False)
-            except Exception: pass
+            except: pass
 
     def _load_model(self):
         try:
-            self.llm = Llama(model_path=self._model_path, n_ctx=2048, verbose=False)
+            self.llm = Llama(model_path=self._model_path, n_ctx=4096, verbose=False)
             log.info(f"[{self.name}] Neural Engine Online.")
-        except Exception: pass
+        except: pass
 
-    def _critique_answer(self, question: str, answer: str, context: str) -> str:
-        # FIX: If the answer contains code, it validates itself. Skip critique.
-        if "```python" in answer:
-            return answer
-
-        if "No specific information" in context or not context:
-            return answer + "\n\n(⚠️ Note: Answer generated without external evidence.)"
-
-        # Standard hallucination check for text answers
-        prompt = (
-            f"<|system|>\n"
-            f"You are a strict Fact Checker. Compare the Answer to the Context.\n"
-            f"If the Answer contains facts NOT found in the Context, output 'YES'. Otherwise 'NO'.\n"
-            f"Context:\n{context}</s>\n"
-            f"Question: {question}\n"
-            f"Answer: {answer}</s>\n"
-            f"<|user|>\n"
-            f"Does the answer contain unsupported facts? Yes/No\n"
-            f"<|assistant|>\n"
-        )
-        try:
-            output = self.safe_generate(prompt, max_tokens=5, stop=["\n"], echo=False)
-            if "yes" in output['choices'][0]['text'].strip().lower():
-                return answer + "\n\n(⚠️ Critic Warning: Answer may contain hallucinations.)"
-            return answer
-        except:
-            return answer
+    def process_step(self): pass
 
     def _on_query_received(self, query_text: str, request_id: str):
-        log.info(f"[{self.name}] Thinking about: '{query_text}'")
-        trace_manager.record(request_id, self.name, "Processing Query", query_text)
+        log.info(f"[{self.name}] Ingesting: '{query_text}'")
+        trace_manager.record(request_id, self.name, "Surface Layer", query_text)
         
+        parsed = self.lang_engine.parse_query(query_text)
+        intent = parsed.get("intent", "unknown")
+        target = parsed.get("target", query_text)
+        search_target = self._clean_target_name(target)
+        
+        response = ""
+        tool_used = False
+
+        # ROUTING & EXECUTION
+        if intent == "action:calculate":
+            try:
+                expr = parsed.get('expression', target)
+                expr = re.sub(r'(?i)\b(calculate|solve|compute|what is)\b', '', expr).strip("?. ")
+                result = CodeExecutor.execute(f"print({expr})")
+                response = f"Calculation Result:\n{result}"
+                tool_used = True
+                self._update_self_model("can perform", "calculation") # <--- RECORD SKILL
+            except Exception as e:
+                response = f"Calculation failed: {e}"
+
+        elif intent in ["query:identity", "query:definition", "query:explanation", "unknown"]:
+            facts = self._retrieve_facts(search_target)
+            
+            if facts:
+                response = self._synthesize_with_llm(target, facts)
+                self._update_self_model("knows about", target) # <--- RECORD KNOWLEDGE
+            else:
+                # Gap
+                search_topic = target if len(target.split()) < 5 else self._extract_topic(query_text)
+                self.publish(EVENT_GAP_DETECTED, topic=search_topic, request_id=request_id)
+                response = self.lang_gen.generate_unknown(target)
+                self._update_self_model("is learning about", target) # <--- RECORD CURIOSITY
+
+        # --- NEW: SELF-REFLECTION CHECK ---
+        # If the user asks about Turiya, we inject the "Ego" facts
+        if any(t in query_text.lower() for t in ["who are you", "what are you", "tell me about yourself"]):
+            self_facts = self._retrieve_facts("Turiya")
+            if self_facts:
+                self_story = self._synthesize_with_llm("Turiya", self_facts)
+                response = f"{self_story}\n\n(Internal Stats: {self.self_monitor.get_system_report()})"
+        
+        # UPDATE HISTORY
+        self.chat_history.append({'role': 'user', 'content': query_text})
+        self.chat_history.append({'role': 'assistant', 'content': response})
+
+        self.publish(EVENT_REASONING_RESPONSE, request_id=request_id, response=response)
+
+    def _update_self_model(self, predicate: str, object_val: str):
+        """
+        Writes an autobiographical fact to the Knowledge Graph.
+        (Turiya, [predicate], [object])
+        """
+        # We use the MemoryManager to inject the fact directly
+        # Subject is always "Turiya"
+        self.memory_manager.add_symbolic_fact(
+            subject="Turiya",
+            predicate=predicate,
+            object_val=object_val,
+            context={"source": "self_reflection"}
+        )
+
+    def _clean_target_name(self, name: str) -> str:
+        titles = ["Lord", "Lady", "Sir", "Dr", "Doctor", "The", "Mr", "Ms", "Mrs", "Prof", "Professor"]
+        clean = name
+        for title in titles:
+            clean = re.sub(rf"(?i)^{title}\s+", "", clean)
+        return clean.strip()
+
+    def _synthesize_with_llm(self, subject: str, facts: List[tuple]) -> str:
+        if not self.llm: return self.lang_gen._realize_narrative(subject, facts)
+
+        fact_list = "\n".join([f"- {s} {p} {o}" for s, p, o in facts[:12]])
+        
+        prompt = (
+            f"<|system|>\n"
+            f"You are Turiya, an AI. Summarize the facts below into a natural response. "
+            f"If the facts are about 'Turiya', speak in the first person ('I am...'). "
+            f"Only use the provided facts.\n\n"
+            f"Facts about {subject}:\n{fact_list}</s>\n"
+            f"<|user|>\n"
+            f"Write a biography about {subject}.\n"
+            f"<|assistant|>\n"
+        )
+
         try:
-            # 1. Retrieve
-            concepts = self.memory_manager.find_relevant_concepts(query_text, k=2, min_similarity=0.5)
-            memories = self.memory_manager.find_relevant_memories(query_text, k=3, min_similarity=0.4)
-            trace_manager.record(request_id, self.name, "Retrieval", f"C:{len(concepts)} M:{len(memories)}")
-
-            # 2. Curiosity Check
-            peak = max((concepts[0][1] if concepts else 0), (memories[0][1] if memories else 0))
-            if peak < 0.5: 
-                # Don't trigger search if it's obviously just math
-                # Check if query contains math symbols, even if it has words like "what is"
-                # We look for at least one operator (+-*/) surrounded by digits
-                is_pure_math = bool(re.search(r'\d+\s*[\+\-\*\/]\s*\d+', query_text))
-                if not is_pure_math:
-                    topic = self._extract_topic(query_text)
-                    self.publish(EVENT_GAP_DETECTED, topic=topic, request_id=request_id)
-
-            # 3. Context Building
-            context_text = ""
-            sources = set()
-            
-            # Self-Reflect
-            if any(t in query_text.lower() for t in ["you", "your", "self", "turiya"]):
-                context_text += f"{self.self_monitor.get_system_report()}\n\n"
-                sources.add("Self-Monitor")
-
-            if concepts:
-                for c, _ in concepts: context_text += f"Concept: {c['name']}: {c['definition']}\n"
-            if memories:
-                for m, _ in memories: 
-                    context_text += f"Fact: {m['content']}\n"
-                    sources.add(json.loads(m['metadata']).get('original_source', 'unknown'))
-
-            if not context_text: context_text = "No specific information found."
-
-            # 4. PROMPT SELECTION (The Math Fix)
-            # Detect math symbols or keywords
-            is_math = bool(re.search(r'\d+\s*[\+\-\*\/]\s*\d+', query_text)) or \
-                      any(w in query_text.lower() for w in ["calculate", "compute", "solve", "math"])
-
-            if is_math:
-                # SPECIAL CALCULATOR PROMPT
-                trace_manager.record(request_id, self.name, "Mode Switch", "Calculator Persona Activated")
-                prompt = (
-                    f"<|system|>\n"
-                    f"You are a Python Calculator. User wants math. Write a script to solve it.\n"
-                    f"RULES: Define variables. Print the result.\n"
-                    f"Example:\nUser: 10 * 10\n```python\na=10\nb=10\nprint(a*b)\n```\n"
-                    f"<|user|>\n"
-                    f"{query_text}</s>\n"
-                    f"<|assistant|>\n"
-                )
-            else:
-                # STANDARD RAG PROMPT
-                history_text = ""
-                for msg in self.chat_history:
-                    role = "<|user|>" if msg['role'] == 'user' else "<|assistant|>"
-                    history_text += f"{role}\n{msg['content']}</s>\n"
-
-                prompt = (
-                    f"<|system|>\n"
-                    f"You are Turiya. Answer using Context. If code is needed, use ```python```.\n"
-                    f"Context:\n{context_text}</s>\n"
-                    f"{history_text}"
-                    f"<|user|>\n"
-                    f"{query_text}</s>\n"
-                    f"<|assistant|>\n"
-                )
-
-            # 5. Generation
-            output = self.safe_generate(prompt, max_tokens=400, stop=["</s>"], echo=False)
-            raw_response = output['choices'][0]['text'].strip()
-
-            # 6. Critic (Skipped if math detected to avoid noise)
-            if is_math:
-                response_text = raw_response
-            else:
-                response_text = self._critique_answer(query_text, raw_response, context_text)
-
-            # 7. Tool Execution
-            code_blocks = re.findall(r"```python(.*?)```", response_text, re.DOTALL)
-            if code_blocks:
-                trace_manager.record(request_id, self.name, "Tool Usage", "Executing Code")
-                execution_result = CodeExecutor.execute(code_blocks[-1])
-                response_text += f"\n\n--- 🔧 TOOL OUTPUT ---\n{execution_result}"
-                sources.add("Code Interpreter")
-
-            if sources and not is_math:
-                response_text += f"\n\n(Sources: {', '.join(list(sources))})"
-
-            # 8. History Hygiene (Prevent warning loops)
-            self.chat_history.append({'role': 'user', 'content': query_text})
-            # Remove sources AND warnings before saving to history
-            clean_response = response_text.split('\n\n(Sources:')[0]
-            clean_response = clean_response.split('\n\n(⚠️')[0] 
-            clean_response = clean_response.split('\n\n--- 🔧')[0] # Don't save tool output to history (saves context window space)
-            self.chat_history.append({'role': 'assistant', 'content': clean_response})
-
-            self.publish(EVENT_REASONING_RESPONSE, request_id=request_id, response=response_text)
-            
+            output = self.safe_generate(prompt, max_tokens=200, stop=["</s>"], echo=False)
+            return output['choices'][0]['text'].strip()
         except Exception as e:
-            log.error(f"[{self.name}] Error: {e}", exc_info=True)
-            self.publish(EVENT_REASONING_RESPONSE, request_id=request_id, response="Error thinking.")
+            log.error(f"LLM Synthesis failed: {e}")
+            return self.lang_gen._realize_narrative(subject, facts)
 
-    # (Keep _on_extract_facts and _extract_topic as they were)
+    def _retrieve_facts(self, entity_name: str) -> List[tuple]:
+        facts = []
+        conn = self.memory_manager.ltm._get_connection()
+        
+        cursor = conn.execute(
+            "SELECT subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY LENGTH(subject) ASC LIMIT 15",
+            (f"%{entity_name}%",)
+        )
+        rows = cursor.fetchall()
+        
+        if len(rows) < 3 and " " in entity_name:
+            terms = entity_name.split()
+            if len(terms) > 1 and len(terms[-1]) > 3:
+                surname = terms[-1]
+                cursor = conn.execute(
+                    "SELECT subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY LENGTH(subject) ASC LIMIT 10",
+                    (f"%{surname}%",)
+                )
+                rows.extend(cursor.fetchall())
+
+        seen = set()
+        for r in rows:
+            ft = (r['subject'], r['predicate'], r['object'])
+            if ft not in seen and len(r['subject']) < 100:
+                facts.append(ft)
+                seen.add(ft)
+        
+        return facts
+
     def _on_extract_facts(self, text: str, source: str):
-        if not self.llm: return
-        triples = SymbolicEngine.extract_triples(text, self.safe_generate)
+        triples = self.lang_engine.extract_triples_rule_based(text)
         if triples:
             count = 0
-            for (subj, pred, obj) in triples:
-                res = self.memory_manager.add_symbolic_fact(subj, pred, obj, {"source": source})
+            for (s, p, o) in triples:
+                res = self.memory_manager.add_symbolic_fact(s, p, o, {"source": source})
                 if res > 0: count += 1
             if count > 0:
-                log.info(f"[{self.name}] Graph Updated: +{count} facts from {source}")
-
+                log.info(f"[{self.name}] Graph Updated: +{count} facts")
+                
     def _extract_topic(self, query: str) -> str:
-        # Simple extraction logic
-        prompt = f"Extract keyword:\nQuestion: Who is Turing?\nKeyword: Turing\nQuestion: {query}\nKeyword:"
-        try:
-            output = self.safe_generate(prompt, max_tokens=10, stop=["\n"], echo=False)
-            return output['choices'][0]['text'].strip() or query
-        except:
-            return query
-
-if __name__ == "__main__":
-    print("Test via main.py")
+        return query

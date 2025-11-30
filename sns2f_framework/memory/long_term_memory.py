@@ -31,8 +31,11 @@ class LongTermMemory:
         if not hasattr(self.local, 'connection'):
             self.local.connection = sqlite3.connect(self.db_path, 
                                                     detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-                                                    check_same_thread=False)
+                                                    check_same_thread=False,
+                                                    isolation_level=None) # <--- AUTOCOMMIT ENABLED
             self.local.connection.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrency
+            self.local.connection.execute("PRAGMA journal_mode=WAL;")
         return self.local.connection
 
     def _initialize_database(self):
@@ -99,6 +102,19 @@ class LongTermMemory:
                 FOREIGN KEY(source_id) REFERENCES concepts(id),
                 FOREIGN KEY(target_id) REFERENCES concepts(id),
                 UNIQUE(source_id, target_id, relation)
+            );
+            """)
+           
+
+            # --- V3: GRAMMAR LAYER ---
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS grammar_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                structure_hash TEXT UNIQUE NOT NULL, -- Unique ID for the pattern
+                template TEXT NOT NULL,              -- e.g. "{Subject} was a {Adjective} {Object}."
+                pos_sequence TEXT NOT NULL,          -- e.g. "PROPN AUX DET ADJ NOUN"
+                frequency INTEGER DEFAULT 1,
+                example_sentence TEXT
             );
             """)
 

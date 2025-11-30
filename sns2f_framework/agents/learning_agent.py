@@ -12,6 +12,7 @@ from sns2f_framework.core.event_bus import (
     EVENT_STOP_LEARNING   # <--- Added
 )
 from sns2f_framework.memory.memory_manager import MemoryManager
+from sns2f_framework.core.grammar_learner import GrammarLearner
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class LearningAgent(BaseAgent):
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
         super().__init__(name, event_bus)
         self.memory_manager = memory_manager
+        self.grammar_learner = GrammarLearner(memory_manager)
         self.memories_consolidated = 0
         
         # New Flag: Is the system currently in "Active Learning" mode?
@@ -94,7 +96,8 @@ class LearningAgent(BaseAgent):
                 self.memories_consolidated += 1
                 self.publish(EVENT_LEARNING_NEW_MEMORY, memory_id=memory_id)
                 self.publish(EVENT_EXTRACT_FACTS, text=content, source=source)
-                
+                # LEARN GRAMMAR
+                #self.grammar_learner.learn(content)
             except Exception as e:
                 log.error(f"[{self.name}] Failed to consolidate observation: {e}", exc_info=True)
         
