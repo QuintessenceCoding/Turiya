@@ -29,23 +29,19 @@ log = logging.getLogger(__name__)
 
 class ReasoningAgent(BaseAgent):
     """
-    The Hybrid Brain (V7.0: Self-Aware).
-    Records its own actions into the Knowledge Graph to build an identity.
+    The Hybrid Brain (V7.1: Stable).
+    Fixed data type handling between Retrieval and Generation.
     """
 
     def __init__(self, name: str, event_bus: EventBus, memory_manager: MemoryManager):
         super().__init__(name, event_bus)
         self.memory_manager = memory_manager
         
-        # Engines
         self.lang_engine = LanguageEngine()
         self.lang_gen = LanguageGenerator(memory_manager) 
         self.self_monitor = SelfMonitor(memory_manager)
         
-        # Context
         self.chat_history = deque(maxlen=6)
-
-        # Neural Engine
         self.llm: Llama = None
         self._model_path = os.path.join(MODEL_DIR, MODEL_FILENAME)
         self.llm_lock = threading.Lock()
@@ -57,9 +53,6 @@ class ReasoningAgent(BaseAgent):
         log.info(f"[{self.name}] Booting Hybrid Core...")
         self._ensure_model_exists()
         self._load_model()
-        
-        # --- NEW: Initialize Self-Concept ---
-        # We ensure "Turiya" exists as a subject in the graph
         self._update_self_model("is", "an Artificial Intelligence")
         self._update_self_model("runs on", "Local Hardware")
 
@@ -83,8 +76,7 @@ class ReasoningAgent(BaseAgent):
     def process_step(self): pass
 
     def _on_query_received(self, query_text: str, request_id: str):
-        import time # Ensure time is available
-        
+        import time
         log.info(f"[{self.name}] Ingesting: '{query_text}'")
         trace_manager.record(request_id, self.name, "Surface Layer", query_text)
         
@@ -93,7 +85,7 @@ class ReasoningAgent(BaseAgent):
         target = parsed.get("target", query_text)
         search_target = self._clean_target_name(target)
         
-        log.info(f"[{self.name}] Intent: {intent} | Target: {target}")
+        log.info(f"[{self.name}] Intent: {intent} | Target: {target} -> Search: {search_target}")
         
         response = ""
 
@@ -114,36 +106,27 @@ class ReasoningAgent(BaseAgent):
             # 2. If Missing, Trigger Hunt & Wait
             if not facts:
                 log.info(f"[{self.name}] Gap detected for: {target}")
-                
-                # Trigger the Perception Agent
                 search_topic = target if len(target.split()) < 5 else self._extract_topic(query_text)
                 self.publish(EVENT_GAP_DETECTED, topic=search_topic, request_id=request_id)
                 self._update_self_model("is learning about", target)
                 
-                # --- THE WAIT LOOP ---
                 log.info(f"[{self.name}] Waiting for learning stream...")
-                for i in range(20): # Poll 10 times (20 seconds max)
+                for i in range(30): 
                     time.sleep(2.0)
-                    # Check DB again
                     facts = self._retrieve_facts(search_target)
                     if facts:
                         log.info(f"[{self.name}] Data arrived! Resume thinking.")
                         break
-                # ---------------------
 
-            # 3. Synthesize (This handles both immediate hits AND successful waits)
             if facts:
                 log.info(f"[{self.name}] Retrieved {len(facts)} facts.")
-                # Hebbian Reinforcement
                 for f in facts:
                     self.memory_manager.ltm.reinforce_fact(f['id'], amount=1.0)
                 
-                # Generate Answer
-                fact_tuples = [(f['s'], f['p'], f['o']) for f in facts]
-                response = self._synthesize_with_llm(target, fact_tuples)
+                # FIX: Pass 'facts' directly (List of Dicts), do NOT convert to tuples yet
+                response = self._synthesize_with_llm(target, facts)
                 self._update_self_model("knows about", target)
             else:
-                # 4. Timeout (Still no data after waiting)
                 response = self.lang_gen.generate_unknown(target) + " (I am currently reading sources. Please ask me again in a moment.)"
 
         # Self-Reflection Logic
@@ -159,49 +142,27 @@ class ReasoningAgent(BaseAgent):
         self.publish(EVENT_REASONING_RESPONSE, request_id=request_id, response=response)
 
     def _update_self_model(self, predicate: str, object_val: str):
-        """
-        Writes an autobiographical fact to the Knowledge Graph.
-        (Turiya, [predicate], [object])
-        """
-        # We use the MemoryManager to inject the fact directly
-        # Subject is always "Turiya"
-        self.memory_manager.add_symbolic_fact(
-            subject="Turiya",
-            predicate=predicate,
-            object_val=object_val,
-            context={"source": "self_reflection"}
-        )
+        self.memory_manager.add_symbolic_fact("Turiya", predicate, object_val, {"source": "self_reflection"})
 
     def _clean_target_name(self, name: str) -> str:
-        """
-        Removes titles and articles to improve database matching and searching.
-        """
-        # 1. Remove Honorifics
         titles = ["Lord", "Lady", "Sir", "Dr", "Doctor", "The", "Mr", "Ms", "Mrs", "Prof", "Professor"]
         clean = name
         for title in titles:
-            # FIX: Use flags=re.IGNORECASE instead of (?i) to avoid position errors
-            clean = re.sub(rf"^{title}\s+", "", clean, flags=re.IGNORECASE)
+            clean = re.sub(rf"(?i)^{title}\s+", "", clean, flags=re.IGNORECASE)
         
-        # 2. Remove Leading Articles
-        # Matches "A Tardigrade" -> "Tardigrade", "An Apple" -> "Apple"
-        # FIX: flags=re.IGNORECASE handles capitalization safely
         clean = re.sub(r"^(a|an|the)\s+", "", clean, flags=re.IGNORECASE)
-        
         return clean.strip()
 
-    def _synthesize_with_llm(self, subject: str, facts: List[dict]) -> str:
+    def _synthesize_with_llm(self, subject: str, facts: List[Dict]) -> str:
         """
-        The Editor Pattern.
-        Input: List of Fact Dictionaries.
-        Output: Human Paragraph.
+        Takes a list of Fact Dictionaries (from _retrieve_facts) and generates text.
         """
+        # Fallback if LLM missing
         if not self.llm: 
-            # Fallback requires tuples, so convert back if needed
             fact_tuples = [(f['s'], f['p'], f['o']) for f in facts]
             return self.lang_gen._realize_narrative(subject, fact_tuples)
 
-        # FIX: Access dictionary keys instead of unpacking tuples
+        # Build prompt from Dicts
         fact_strings = []
         for f in facts[:15]:
             fact_strings.append(f"- {f['s']} {f['p']} {f['o']}")
@@ -231,129 +192,91 @@ class ReasoningAgent(BaseAgent):
             return self.lang_gen._realize_narrative(subject, fact_tuples)
 
     def _retrieve_facts(self, entity_name: str) -> List[dict]:
-        """
-        Queries LTM using Hebbian Ranking.
-        Returns dicts now: {'id': 1, 's': '...', 'p': '...', 'o': '...'}
-        """
         facts = []
         conn = self.memory_manager.ltm._get_connection()
         
-        # SORT BY: usage_weight DESC (Important stuff first), then Length (Specific stuff)
-        query = """
-            SELECT id, subject, predicate, object 
-            FROM symbolic_knowledge 
-            WHERE subject LIKE ? 
-            ORDER BY usage_weight DESC, LENGTH(subject) ASC 
-            LIMIT 15
-        """
-        
-        cursor = conn.execute(query, (f"%{entity_name}%",))
+        cursor = conn.execute(
+            "SELECT id, subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY usage_weight DESC, LENGTH(subject) ASC LIMIT 15",
+            (f"%{entity_name}%",)
+        )
         rows = cursor.fetchall()
         
-        # ... (Partial match logic would also use the same ORDER BY) ...
+        if len(rows) < 3 and " " in entity_name:
+            terms = entity_name.split()
+            if len(terms) > 1 and len(terms[-1]) > 3:
+                surname = terms[-1]
+                cursor = conn.execute(
+                    "SELECT id, subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY usage_weight DESC, LENGTH(subject) ASC LIMIT 10",
+                    (f"%{surname}%",)
+                )
+                rows.extend(cursor.fetchall())
 
         seen = set()
         for r in rows:
-            # Create a unique key for deduplication
-            fact_tuple = (r['subject'], r['predicate'], r['object'])
-            if fact_tuple not in seen and len(r['subject']) < 100:
-                # Store ID so we can reinforce later
-                facts.append({
-                    'id': r['id'],
-                    's': r['subject'],
-                    'p': r['predicate'],
-                    'o': r['object']
-                })
-                seen.add(fact_tuple)
+            ft = (r['subject'], r['predicate'], r['object'])
+            if ft not in seen and len(r['subject']) < 100:
+                facts.append({'id': r['id'], 's': r['subject'], 'p': r['predicate'], 'o': r['object']})
+                seen.add(ft)
         
         return facts
 
     def _on_extract_facts(self, text: str, source: str, confidence: float = 0.5):
-        """
-        Extracts facts and applies the 'Soft Judge' logic.
-        """
         if not self.llm: return
         triples = SymbolicEngine.extract_triples(text, self.safe_generate)
         
         if triples:
             count = 0
             for (s, p, o) in triples:
-                # 1. Check for conflicts
-                is_new_info = self._handle_contradiction(s, p, o, confidence)
-                
-                if is_new_info:
-                    # 2. Add to DB with the calculated confidence
+                is_valid = self._judge_contradiction(s, p, o, confidence)
+                if is_valid:
                     res = self.memory_manager.ltm.add_fact(s, p, o, {"source": source}, confidence)
                     if res > 0: count += 1
-            
             if count > 0:
-                log.info(f"[{self.name}] Graph Updated: +{count} facts (Conf: {confidence})")
+                log.info(f"[{self.name}] Graph Updated: +{count} facts")
 
-    def _handle_contradiction(self, subject: str, predicate: str, new_object: str, new_conf: float) -> bool:
-        """
-        The Soft Judge.
-        Returns True if we should add the new fact.
-        Side Effect: Lowers confidence of conflicting facts in the DB.
-        """
-        # 1. Fetch existing facts with same Subject + Predicate
+    def _judge_contradiction(self, subject: str, predicate: str, new_object: str, new_conf: float) -> bool:
+        if not self.llm: return True
         with self.memory_manager.ltm as conn:
             rows = conn._get_connection().execute(
                 "SELECT id, object, confidence FROM symbolic_knowledge WHERE subject = ? AND predicate = ?",
                 (subject, predicate)
             ).fetchall()
         
-        existing_conflicts = [(r['id'], r['object'], r['confidence']) for r in rows]
-        
-        # Filter out exact duplicates (case insensitive)
-        existing_conflicts = [x for x in existing_conflicts if x[1].lower() != new_object.lower()]
+        existing_conflicts = [(r['id'], r['object'], r['confidence']) for r in rows if r['object'].lower() != new_object.lower()]
+        if not existing_conflicts: return True
 
-        if not existing_conflicts:
-            return True # No conflict
-
-        # 2. LLM Arbitration
-        # We only ask the LLM if the objects seem totally different
-        # (Skipping simple synonyms to save compute)
         conflict_desc = existing_conflicts[0][1]
         old_id = existing_conflicts[0][0]
         old_conf = existing_conflicts[0][2]
 
-        log.info(f"[{self.name}] ⚖️ Judge: '{subject} {predicate} {new_object}' vs '{conflict_desc}'")
-        
         prompt = (
-            f"<|system|>\n"
-            f"You are a Logic Judge. Analyze these two statements.\n"
+            f"Judge truth:\n"
             f"A: {subject} {predicate} {new_object}\n"
             f"B: {subject} {predicate} {conflict_desc}\n"
-            f"Are these contradictory? (e.g. Born in 1900 vs Born in 1910). Output YES or NO.\n"
-            f"<|assistant|>\n"
+            f"Contradictory? YES/NO."
         )
-        
         try:
             output = self.safe_generate(prompt, max_tokens=5, stop=["\n"], echo=False)
-            verdict = output['choices'][0]['text'].strip().lower()
-            
-            if "yes" in verdict:
-                # CONTRADICTION DETECTED
-                # We do NOT delete. We adjust confidence.
-                
+            if "yes" in output['choices'][0]['text'].strip().lower():
                 if new_conf > old_conf:
-                    # New fact is more trusted. Downgrade the old one.
-                    log.info(f"[{self.name}] ⚖️ Verdict: New fact is stronger. Demoting old fact.")
-                    self.memory_manager.ltm.reinforce_fact(old_id, amount=-0.2) # Reduce weight/confidence
+                    self.memory_manager.ltm.reinforce_fact(old_id, amount=-0.2)
                     return True
-                else:
-                    # Old fact is stronger. We still add the new one, but maybe warn?
-                    # Or we can choose to reject the new one if the gap is huge.
-                    if old_conf > 0.8 and new_conf < 0.4:
-                         log.warning(f"[{self.name}] ⚖️ Verdict: REJECTED weak new fact.")
-                         return False
-                    return True
-            else:
-                # No contradiction (e.g. "Turing is Mathematician" vs "Turing is Biologist" -> Both true)
-                return True
-                
-        except:
-            return True # Fail open
-                
+                elif old_conf > 0.8 and new_conf < 0.4:
+                     return False
+            return True
+        except: return True
+
     def _extract_topic(self, query: str) -> str:
-        return query
+        history_context = ""
+        if self.chat_history:
+            for msg in list(self.chat_history)[-2:]:
+                role = "User" if msg['role'] == 'user' else "Assistant"
+                history_context += f"{role}: {msg['content']}\n"
+        prompt = f"Extract keyword.\nHistory:\n{history_context}User: {query}\nKeyword:"
+        try:
+            output = self.safe_generate(prompt, max_tokens=15, stop=["\n"], echo=False)
+            return output['choices'][0]['text'].strip() or query
+        except: return query
+
+if __name__ == "__main__":
+    print("Test via main.py")
