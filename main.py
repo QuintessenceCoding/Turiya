@@ -36,7 +36,7 @@ def print_banner():
 /____/ /_/ |_/  /____/  /____/ /_/      
                                         
 Self-Evolving Neuro-Symbolic Swarm Framework
-v2.1 - "Conversational"
+v7.0 - "Conscious"
 --------------------------------------------
 Commands:
   /start   - Start autonomous learning
@@ -45,6 +45,8 @@ Commands:
   /trace   - Show the thought process
   /consolidate - Crystallize concepts
   /sleep   - Perform maintenance cycle
+  /set mode [strict|safe|open] - Change crawler safety
+  /flush   - Clear crawler queue
   /quit    - Exit
 --------------------------------------------
     """, flush=True)
@@ -59,9 +61,9 @@ def main():
     print("--- Starting Agents ---")
     orc.start()
     
-    print("--- Waiting for Neural Engine (2s) ---")
+    print("--- Waiting for Neural Engine (10s) ---")
     # Increased wait time to let the LLM load cleanly before we take over the screen
-    time.sleep(5.0)
+    time.sleep(10.0)
     
     print_banner()
     
@@ -106,19 +108,33 @@ def main():
                     orc.ask(query, handle_response, request_id=last_req_id)
                 else:
                     print("[System]: Ask what?")
+
+            elif user_input.lower() == "/flush":
+                orc.flush_perception()
+                print("[System]: Crawler queue cleared. Ready for new sources.")
             
             elif user_input.lower() == "/sleep":
                 print("[System]: Initiating Sleep Cycle (Memory Pruning)...")
                 stats = orc.sleep_cycle()
                 
-                # FIX: Added 'Abstractions Created' to the report
                 print(f"[System]: Sleep Complete.")
                 print(f"   - Noise Deleted:     {stats.get('deleted_noise', 0)}")
                 print(f"   - Duplicates Merged: {stats.get('merged_duplicates', 0)}")
-                print(f"   - Concepts Crystallized: {stats.get('concepts_formed', 0)}")
-                print(f"   - New Categories Invented: {stats.get('abstractions_formed', 0)}")
+                print(f"   - Concepts Formed:   {stats.get('concepts_formed', 0)}")
+                print(f"   - New Categories:    {stats.get('abstractions_formed', 0)}")
             
-            
+            elif user_input.lower().startswith("/set mode"):
+                parts = user_input.split()
+                if len(parts) == 3:
+                    mode = parts[2].lower()
+                    if mode in ["strict", "safe", "open"]:
+                        orc.set_crawl_mode(mode)
+                        print(f"[System]: Crawl mode set to {mode.upper()}.")
+                    else:
+                        print("[System]: Invalid mode. Use: strict, safe, open")
+                else:
+                    print("[System]: Usage: /set mode [strict|safe|open]")
+
             else:
                 print("[System]: Unknown command.")
 

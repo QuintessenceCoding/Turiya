@@ -1,103 +1,232 @@
 # Turiya: Self-Evolving Neuro-Symbolic Swarm (SNS²F)
 
-**Turiya** is a research-grade Cognitive Architecture that runs entirely on local hardware (CPU). Unlike standard LLM wrappers, Turiya is a **Stateful, Autonomous Entity** that builds its own world model, manages its own memory, and evolves over time.
+### A Local, Autonomous Cognitive Architecture Inspired by Human Intelligence
 
 ![Status](https://img.shields.io/badge/Status-Operational-green)
 ![Architecture](https://img.shields.io/badge/Architecture-Neuro--Symbolic-blueviolet)
 ![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-success)
 
-## 🧠 The Architecture
+## 🧠 Overview
 
-Turiya rejects the "Black Box" approach of pure Deep Learning. Instead, it uses a **Meaning-First** architecture:
+**Turiya** is not a typical AI chatbot. It is a stateful, self-evolving cognitive system combining:
 
-1.  **Perception (The Hunter):** An autonomous crawler that hunts for knowledge gaps on the web using `DuckDuckGo` and `BeautifulSoup`.
-2.  **Memory (The Core):** A Hybrid Database (`SQLite`) combining:
-    * **Vector Embeddings:** For semantic intuition.
-    * **Knowledge Graph:** For precise logical deduction (Triples).
-3.  **Reasoning (The Brain):** A Hybrid Engine combining:
-    * **Symbolic Logic:** Uses `Spacy` for deterministic fact extraction.
-    * **Neural Synthesis:** Uses `Phi-3 Mini` (via `llama.cpp`) for fluent communication.
-    * **Tool Use:** Can write and execute Python code for math/logic.
-4.  **Metacognition (The Soul):**
-    * **Self-Model:** Aware of its own uptime, knowledge size, and capabilities.
-    * **The Critic:** Self-corrects hallucinations before speaking.
-    * **Sleep Cycle:** Prunes noise and generalizes concepts into higher-order abstractions.
+* **Symbolic Reasoning** (Knowledge Graphs, Logic)
+* **Neural Understanding** (Embeddings + Phi-3 Mini)
+* **Autonomous Learning** (Web Crawler + Curiosity Engine)
+* **Cognitive Evolution** (Sleep, Abstraction, Hebbian Reinforcement)
+
+Turiya learns continuously, forms its own world model, corrects contradictions, and evolves its internal knowledge structure — all running locally on your CPU.
+
+This project demonstrates how to build an explainable, self-growing, and hardware-efficient intelligent system without relying on cloud APIs.
+
+---
+
+## ⚡ Highlights
+
+### 🔍 Learning
+* **Autonomous Web Crawling:** Automatically hunts for information to fill knowledge gaps.
+* **Immune System:** Filters low-quality sources (ads, spam) to keep the knowledge base clean.
+* **Continuous Ingestion:** Text $\to$ Embedding $\to$ Fact Extraction pipeline.
+
+### 🧠 Reasoning
+* **Deterministic Extraction:** Uses Spacy to extract Subject-Verb-Object triples.
+* **Symbolic Inference:** Walks the Knowledge Graph to find hidden connections.
+* **Code Execution:** Detects math/logic problems and writes Python code to solve them.
+* **Neural Synthesis:** Uses `Phi-3 Mini` to generate fluent, grounded responses.
+
+### 🧬 Cognitive Evolution
+* **Hebbian Weighting:** Memories strengthen when used ("neurons that fire together, wire together").
+* **Forgetting & Pruning:** Unused memories decay and are removed during sleep cycles.
+* **Generalization:** Automatically clusters facts to create abstract Super-Concepts (e.g., "Carnivore").
+* **Self-Modeling:** Turiya maintains a self-concept and knows its own stats.
+* **Truth Arbitration:** A "Judge" module detects contradictions and resolves truth based on source confidence.
+
+### 🔒 Privacy
+* **100% Local:** No external API calls (OpenAI/Anthropic). No data leaves your machine.
+
+---
 
 ## 🚀 Installation
 
-Turiya requires **Python 3.10+** and a decent CPU. No GPU required.
+**Requirements:** Python 3.10+ and a decent CPU. No GPU necessary.
 
-1.  **Clone the repository:**
+1.  **Clone the repository**
     ```bash
     git clone [https://github.com/YOUR_USERNAME/Turiya.git](https://github.com/YOUR_USERNAME/Turiya.git)
     cd Turiya
     ```
 
-2.  **Create a Virtual Environment:**
+2.  **Create a virtual environment**
     ```bash
     python -m venv .venv
     # Windows:
-    .\.venv\Scripts\Activate.ps1
+    .\.venv\Scripts\activate
     # Mac/Linux:
     source .venv/bin/activate
     ```
 
-3.  **Install Dependencies:**
+3.  **Install dependencies**
     ```bash
     pip install -r requirements.txt
     ```
 
-4.  **Install Language Engine:**
+4.  **Install SpaCy language model**
     ```bash
     python -m spacy download en_core_web_sm
     ```
 
-5.  **First Run:**
+5.  **First Run**
     ```bash
     python main.py
     ```
-    *Note: On the first run, Turiya will automatically download the Phi-3 GGUF model (~2.4GB). Please wait.*
+    *Note: On first launch, Turiya automatically downloads the Phi-3 Mini GGUF model (~2.4GB).*
+
+---
 
 ## 🎮 Usage
 
-### The Command Line Interface (CLI)
-Run `python main.py` to enter the console.
+### Core Commands (CLI)
 
-* `/ask <question>` - Ask Turiya a question.
-    * *Example:* `/ask Who is Alan Turing?`
-    * *Example:* `/ask Calculate 50 * 50`
-* `/start` - Wake up the Swarm. The Perception Agent will begin crawling the web to fill knowledge gaps.
-* `/stop` - Pause the Swarm safely.
-* `/sleep` - Trigger Memory Consolidation. The system prunes noise, merges duplicates, and forms new Concepts.
-* `/trace` - View the step-by-step thought process of the last query.
+| Command | Description |
+| :--- | :--- |
+| `/ask <question>` | Ask Turiya anything. (Triggers Retrieval & Thinking) |
+| `/start` | Activate autonomous crawling (Perception Agent). |
+| `/stop` | Pause crawling safely (Finish current digestion). |
+| `/set mode [mode]`| Change crawler safety (`strict`, `safe`, `open`). |
+| `/sleep` | Trigger memory consolidation (Abstraction, Pruning). |
+| `/trace` | Show step-by-step reasoning for the last query. |
+| `/flush` | Clear the crawler frontier queue. |
+| `/quit` | Exit the system. |
 
-### The Web Interface
-Run `streamlit run app.py` for a modern chat interface.
+### Safety Modes
+* **`strict`**: Wikipedia, .edu, .gov sites only. (High Trust).
+* **`safe`**: Blocks social media & low-quality sources. (Balanced).
+* **`open`**: Full internet crawling with basic blacklist protection. (Maximum Reach).
 
-### The Neural Dashboard
-Run `streamlit run dashboard.py` to visualize the Knowledge Graph growing in real-time.
+### Web Interfaces
 
-## 🧪 Cognitive Features
+**Chat Interface:**
+```bash
+streamlit run app.py
+```
+Knowledge Graph Dashboard:
 
-### 1. Autonomous Curiosity
-If you ask Turiya about a topic it doesn't know, it won't hallucinate. It will say "I don't know," flag a **Knowledge Gap**, and immediately dispatch the Perception Agent to scrape Wikipedia and learn about it.
+```bash
 
-### 2. Meaning-First Logic
-Turiya parses text into S-V-O triples (`Turing -> is -> Mathematician`). This allows it to perform multi-hop inference (`Turing -> Machine -> Computation`) that pure LLMs often struggle with.
+streamlit run dashboard.py
+```
+### 🧠 Architecture
+```bash
++-----------------------------+
+|         Orchestrator        |
+|        (EventBus)           |
++-----------------------------+
+       |         |         |
+       v         v         v
+  Reasoning   Perception   Learning
+    Agent       Agent        Agent
+       |           |            |
+       +---------- Memory ------+
+                    |
+              Sleep / Judge
 
-### 3. Agentic Coding
-Turiya detects math or logic problems, writes a Python script in a sandbox, executes it, and returns the exact result.
+```
+**🐾 1. Perception Agent — The Hunter**
+An autonomous, stateful web crawler.
 
-## 📂 Project Structure
+Hunts for **Knowledge Gaps** identified by the Brain.
 
-* `sns2f_framework/`: Core engine code.
-    * `agents/`: The autonomous workers (Reasoning, Perception, Learning).
-    * `core/`: The nervous system (EventBus, LanguageEngine, GrammarLearner).
-    * `memory/`: The Hybrid Database manager.
-    * `reasoning/`: Higher-order thought (Inference, Generalizer, Critic).
-    * `tools/`: Skill plugins (CodeExecutor).
-* `data/`: Stores the SQLite DB and Models (Not synced to Git).
+Manages a frontier queue and interest_queue.
 
-## 📜 License
+Uses an **Immune System** to block ads, login walls, and binary files.
 
-MIT License. Built as a research prototype for Neuro-Symbolic AI.
+**💾 2. Memory Manager — The Hybrid Core**
+**Vector Store (Neural Intuition):** Embeds every text chunk into 384-dimensional vectors for semantic search.
+
+**Knowledge Graph (Symbolic Logic):** Stores facts as (Subject, Predicate, Object) triples for precise deduction.
+
+**Hebbian Learning:** Facts gain weight when used; weak facts decay.
+
+**🧠 3. Reasoning Agent — The Brain**
+**Intent Detection:** Uses Regex + SpaCy to determine user intent.
+
+**Planning:** Breaks complex queries ("Tell me about X") into sub-steps.
+
+**Truth Arbitration:** The Judge compares new facts against old ones to resolve conflicts.
+
+***Generation:*** Uses Phi-3 Mini to synthesize fluent answers rooted in retrieved facts.
+
+**Tool Use:** Writes and executes Python code for math/logic problems.
+
+### 🧬 4. Cognitive Evolution
+**💤 Sleep Cycle**
+When you run /sleep:
+
+**Deduplication:** Merges identical facts.
+
+**Forgetting:** Prunes noise and unused memories.
+
+**Generalization:** Looks for patterns (e.g., items sharing properties) and creates abstract Super-Concepts.
+
+**🔍 Contradiction Resolution**
+When a new fact conflicts with an old one:
+
+1. Check supporting evidence.
+
+2. Ask Phi-3 to judge validity.
+
+3. Keep the stronger fact or adjust confidence scores.
+
+**🎯 Intrinsic Motivation (Curiosity)**
+If the system is idle, it prioritizes learning about topics with:
+
+Low connectivity (Lonely Nodes).
+
+High uncertainty.
+
+Low confidence scores.
+
+### 📂 Project Structure
+```bash
+
+sns2f_framework/
+│
+├── agents/        # Reasoning, Perception, Learning Agents
+├── core/          # EventBus, Language Engine, Trace Manager
+├── memory/        # Hybrid Memory System (LTM/STM)
+├── reasoning/     # Higher-order cognition (Judge, Generalizer, Planner)
+├── skills/        # Agentic tool plugins
+├── tools/         # Code execution sandbox
+└── app.py         # Web UI
+```
+### ⚠️ Limitations
+Even advanced systems have constraints:
+
+1. Parser Bottleneck: SpaCy rules may miss complex or poetic sentence structures.
+
+2. Latency: Crawling + Extraction + Synthesis takes time (10–30 seconds) on a local CPU.
+
+3. Memory Cap: Database size is capped at 500MB (configurable) to prevent disk bloat.
+
+4. Single Node: Runs on one machine; no distributed crawling.
+
+### 🛣️ Future Work
+ Neural Triple Extractor (Transformer-based parsing).
+
+ Graph-based Reinforcement Learning for curiosity strategy.
+
+ Speech I/O integration (Whisper/TTS).
+
+ Distributed multi-node crawling.
+
+### 🧘 Ethical & Safety Notice
+Turiya autonomously crawls the public web. Please use responsibly.
+
+Respect robots.txt (configurable).
+
+Comply with local data laws.
+
+Disclaimer: This project is a research prototype, not a commercial product.
+
+### 📜 License
+MIT License. Built as a research experiment in Neuro-Symbolic AI.

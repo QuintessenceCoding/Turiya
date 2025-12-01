@@ -122,7 +122,7 @@ class ReasoningAgent(BaseAgent):
                 
                 # --- THE WAIT LOOP ---
                 log.info(f"[{self.name}] Waiting for learning stream...")
-                for i in range(10): # Poll 10 times (20 seconds max)
+                for i in range(20): # Poll 10 times (20 seconds max)
                     time.sleep(2.0)
                     # Check DB again
                     facts = self._retrieve_facts(search_target)
@@ -173,10 +173,21 @@ class ReasoningAgent(BaseAgent):
         )
 
     def _clean_target_name(self, name: str) -> str:
+        """
+        Removes titles and articles to improve database matching and searching.
+        """
+        # 1. Remove Honorifics
         titles = ["Lord", "Lady", "Sir", "Dr", "Doctor", "The", "Mr", "Ms", "Mrs", "Prof", "Professor"]
         clean = name
         for title in titles:
-            clean = re.sub(rf"(?i)^{title}\s+", "", clean)
+            # FIX: Use flags=re.IGNORECASE instead of (?i) to avoid position errors
+            clean = re.sub(rf"^{title}\s+", "", clean, flags=re.IGNORECASE)
+        
+        # 2. Remove Leading Articles
+        # Matches "A Tardigrade" -> "Tardigrade", "An Apple" -> "Apple"
+        # FIX: flags=re.IGNORECASE handles capitalization safely
+        clean = re.sub(r"^(a|an|the)\s+", "", clean, flags=re.IGNORECASE)
+        
         return clean.strip()
 
     def _synthesize_with_llm(self, subject: str, facts: List[tuple]) -> str:

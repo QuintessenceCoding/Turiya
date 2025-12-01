@@ -97,3 +97,16 @@ class Orchestrator:
     def _handle_reasoning_response(self, request_id: str, response: str):
         if self._response_callback:
             self._response_callback(response)
+
+    def set_crawl_mode(self, mode: str):
+        """
+        Updates the Perception Agent's safety protocol.
+        """
+        self.perception_agent.set_mode(mode)
+
+    def flush_perception(self):
+        """Clears the crawler's pending queue."""
+        self.perception_agent.frontier.clear()
+        self.perception_agent.visited_urls.clear()
+        self.perception_agent.visited_topics.clear()
+        log.info("Perception Memory Flushed.")

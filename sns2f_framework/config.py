@@ -17,10 +17,30 @@ MODEL_FILENAME = "Phi-3-mini-4k-instruct-q4.gguf"
 
 LOG_LEVEL = logging.INFO
 
+# --- CRAWLER / LEARNING SETTINGS ---
+DEFAULT_CRAWL_MODE = "safe"
+
+# Fallback sources if search fails
 WHITELISTED_SOURCES = [
     "https://en.wikipedia.org/wiki/Artificial_intelligence",
     "https://en.wikipedia.org/wiki/Machine_learning",
-    "https://en.wikipedia.org/wiki/Alan_Turing"
+    "https://en.wikipedia.org/wiki/Cognitive_science",
+    "https://en.wikipedia.org/wiki/Neuro-symbolic_AI"
+]
+
+# STRICT/SAFE MODE DOMAINS (High Quality)
+TRUSTED_DOMAINS = [
+    "wikipedia.org", ".edu", ".gov", "arxiv.org", "britannica.com", 
+    "nature.com", "nasa.gov", "phys.org", "sciencedaily.com", 
+    "gutenberg.org", "smithsonianmag.com", "nationalgeographic.com",
+    "ieee.org", "ncbi.nlm.nih.gov"
+]
+
+# SAFE MODE BLOCKLIST (Low Quality/User Generated)
+LOW_QUALITY_DOMAINS = [
+    "reddit.com", "quora.com", "twitter.com", "x.com", 
+    "facebook.com", "instagram.com", "tiktok.com",
+    "pinterest.com", "blogspot.com", "wordpress.com", "medium.com"
 ]
 
 STM_CAPACITY = 100
