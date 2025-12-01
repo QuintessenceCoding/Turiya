@@ -190,15 +190,27 @@ class ReasoningAgent(BaseAgent):
         
         return clean.strip()
 
-    def _synthesize_with_llm(self, subject: str, facts: List[tuple]) -> str:
-        if not self.llm: return self.lang_gen._realize_narrative(subject, facts)
+    def _synthesize_with_llm(self, subject: str, facts: List[dict]) -> str:
+        """
+        The Editor Pattern.
+        Input: List of Fact Dictionaries.
+        Output: Human Paragraph.
+        """
+        if not self.llm: 
+            # Fallback requires tuples, so convert back if needed
+            fact_tuples = [(f['s'], f['p'], f['o']) for f in facts]
+            return self.lang_gen._realize_narrative(subject, fact_tuples)
 
-        fact_list = "\n".join([f"- {s} {p} {o}" for s, p, o in facts[:15]])
-        
+        # FIX: Access dictionary keys instead of unpacking tuples
+        fact_strings = []
+        for f in facts[:15]:
+            fact_strings.append(f"- {f['s']} {f['p']} {f['o']}")
+            
+        fact_list = "\n".join(fact_strings)
         
         prompt = (
             f"<|system|>\n"
-            f"You are Turiya, an AI assistant. Your task is to write a detailed summary about the topic: '{subject}'.\n"
+            f"You are Turiya, an AI assistant. Write a detailed summary about the topic: '{subject}'.\n"
             f"Rules:\n"
             f"1. Use ONLY the provided facts.\n"
             f"2. Write in an objective, third-person encyclopedic style.\n"
@@ -210,12 +222,13 @@ class ReasoningAgent(BaseAgent):
         )
 
         try:
-          
-            output = self.safe_generate(prompt, max_tokens=1024, stop=["</s>"], echo=False)
+            output = self.safe_generate(prompt, max_tokens=600, stop=["</s>"], echo=False)
             return output['choices'][0]['text'].strip()
         except Exception as e:
             log.error(f"LLM Synthesis failed: {e}")
-            return self.lang_gen._realize_narrative(subject, facts)
+            # Fallback conversion
+            fact_tuples = [(f['s'], f['p'], f['o']) for f in facts]
+            return self.lang_gen._realize_narrative(subject, fact_tuples)
 
     def _retrieve_facts(self, entity_name: str) -> List[dict]:
         """
