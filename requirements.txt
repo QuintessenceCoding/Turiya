@@ -1,0 +1,12 @@
+numpy
+requests
+beautifulsoup4
+sentence-transformers
+spacy
+llama-cpp-python
+huggingface_hub
+duckduckgo-search
+streamlit
+networkx
+matplotlib
+pandas

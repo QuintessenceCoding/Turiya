@@ -3,11 +3,19 @@ sns2f_framework/models/Phi-3-mini-4k-instruct-q4.gguf
 # Python caches
 __pycache__/
 *.pyc
-
-# Local DB
-*.sqlite
-
-# Local model files
-sns2f_framework/data/models/
-sns2f_framework/models/
+env/
+# --- Large Data (Critical) ---
+# Block all SQLite databases anywhere in the project
+*.sqlite*
+*.db
+# Block all massive AI models anywhere in the project
 *.gguf
+*.bin
+# Specific Data Folders
+sns2f_framework/data/models/
+sns2f_framework/data/logs/
+sns2f_framework/models/
+# --- Logs & OS ---
+*.log
+.DS_Store
+Thumbs.db
