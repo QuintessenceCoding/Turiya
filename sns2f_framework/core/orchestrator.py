@@ -15,6 +15,7 @@ from sns2f_framework.agents.reasoning_agent import ReasoningAgent
 from sns2f_framework.reasoning.concept_miner import ConceptMiner
 from sns2f_framework.reasoning.consolidator import Consolidator
 from sns2f_framework.core.trace_manager import trace_manager
+from sns2f_framework.reasoning.generalizer import Generalizer
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +66,23 @@ class Orchestrator:
     def sleep_cycle(self):
         log.info("Command: SLEEP CYCLE")
         self.stop_learning()
+        
+        # 1. Consolidate (Clean & Merge)
         janitor = Consolidator(self.memory_manager)
         stats = janitor.run_sleep_cycle()
+        
+        # 2. Generalize (Evolve)
+        # We need the LLM for naming things
+        if self.reasoning_agent.llm:
+            architect = Generalizer(self.memory_manager, self.reasoning_agent.safe_generate)
+            abstractions = architect.run()
+            stats["abstractions_formed"] = abstractions
+        else:
+            stats["abstractions_formed"] = 0
+            
+        # Reload cache to see new Super-Concepts
+        self.memory_manager._load_caches()
+            
         return stats
 
     def ask(self, question: str, callback: Callable, request_id: str = None):

@@ -108,10 +108,15 @@ def main():
                     print("[System]: Ask what?")
             
             elif user_input.lower() == "/sleep":
-                print("[System]: Initiating Sleep Cycle...")
+                print("[System]: Initiating Sleep Cycle (Memory Pruning)...")
                 stats = orc.sleep_cycle()
-                print(f"[System]: Sleep Complete.\n   - Noise Deleted: {stats['deleted_noise']}\n   - Duplicates Merged: {stats['merged_duplicates']}\n   - Concepts Formed: {stats['concepts_formed']}")
-
+                
+                # FIX: Added 'Abstractions Created' to the report
+                print(f"[System]: Sleep Complete.")
+                print(f"   - Noise Deleted:     {stats.get('deleted_noise', 0)}")
+                print(f"   - Duplicates Merged: {stats.get('merged_duplicates', 0)}")
+                print(f"   - Concepts Crystallized: {stats.get('concepts_formed', 0)}")
+                print(f"   - New Categories Invented: {stats.get('abstractions_formed', 0)}")
             
             
             else:

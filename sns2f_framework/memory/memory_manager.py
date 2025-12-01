@@ -156,3 +156,25 @@ class MemoryManager:
         self._load_caches()
         
         return deleted_count
+    
+    def get_curiosity_targets(self, limit: int = 5) -> List[str]:
+        """
+        Calculates 'Curiosity' based on graph topology.
+        Formula: High Priority = Concepts with few edges (Low Degree).
+        """
+        # We left join concepts with edges to find those with null or few connections
+        query = """
+            SELECT c.name
+            FROM concepts c
+            LEFT JOIN concept_edges e ON c.id = e.source_id OR c.id = e.target_id
+            GROUP BY c.id
+            HAVING COUNT(e.source_id) < 3  -- "Lonely" threshold
+            ORDER BY RANDOM()              -- Shuffle to prevent loops
+            LIMIT ?
+        """
+        try:
+            with self.ltm as conn:
+                rows = conn._get_connection().execute(query, (limit,)).fetchall()
+                return [r['name'] for r in rows]
+        except:
+            return []

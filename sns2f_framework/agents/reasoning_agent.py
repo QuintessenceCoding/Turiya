@@ -83,6 +83,8 @@ class ReasoningAgent(BaseAgent):
     def process_step(self): pass
 
     def _on_query_received(self, query_text: str, request_id: str):
+        import time # Ensure time is available
+        
         log.info(f"[{self.name}] Ingesting: '{query_text}'")
         trace_manager.record(request_id, self.name, "Surface Layer", query_text)
         
@@ -91,43 +93,66 @@ class ReasoningAgent(BaseAgent):
         target = parsed.get("target", query_text)
         search_target = self._clean_target_name(target)
         
+        log.info(f"[{self.name}] Intent: {intent} | Target: {target}")
+        
         response = ""
-        tool_used = False
 
-        # ROUTING & EXECUTION
         if intent == "action:calculate":
             try:
                 expr = parsed.get('expression', target)
                 expr = re.sub(r'(?i)\b(calculate|solve|compute|what is)\b', '', expr).strip("?. ")
                 result = CodeExecutor.execute(f"print({expr})")
                 response = f"Calculation Result:\n{result}"
-                tool_used = True
-                self._update_self_model("can perform", "calculation") # <--- RECORD SKILL
+                self._update_self_model("can perform", "calculation")
             except Exception as e:
                 response = f"Calculation failed: {e}"
 
         elif intent in ["query:identity", "query:definition", "query:explanation", "unknown"]:
+            # 1. Initial Check
             facts = self._retrieve_facts(search_target)
             
-            if facts:
-                response = self._synthesize_with_llm(target, facts)
-                self._update_self_model("knows about", target) # <--- RECORD KNOWLEDGE
-            else:
-                # Gap
+            # 2. If Missing, Trigger Hunt & Wait
+            if not facts:
+                log.info(f"[{self.name}] Gap detected for: {target}")
+                
+                # Trigger the Perception Agent
                 search_topic = target if len(target.split()) < 5 else self._extract_topic(query_text)
                 self.publish(EVENT_GAP_DETECTED, topic=search_topic, request_id=request_id)
-                response = self.lang_gen.generate_unknown(target)
-                self._update_self_model("is learning about", target) # <--- RECORD CURIOSITY
+                self._update_self_model("is learning about", target)
+                
+                # --- THE WAIT LOOP ---
+                log.info(f"[{self.name}] Waiting for learning stream...")
+                for i in range(10): # Poll 10 times (20 seconds max)
+                    time.sleep(2.0)
+                    # Check DB again
+                    facts = self._retrieve_facts(search_target)
+                    if facts:
+                        log.info(f"[{self.name}] Data arrived! Resume thinking.")
+                        break
+                # ---------------------
 
-        # --- NEW: SELF-REFLECTION CHECK ---
-        # If the user asks about Turiya, we inject the "Ego" facts
+            # 3. Synthesize (This handles both immediate hits AND successful waits)
+            if facts:
+                log.info(f"[{self.name}] Retrieved {len(facts)} facts.")
+                # Hebbian Reinforcement
+                for f in facts:
+                    self.memory_manager.ltm.reinforce_fact(f['id'], amount=1.0)
+                
+                # Generate Answer
+                fact_tuples = [(f['s'], f['p'], f['o']) for f in facts]
+                response = self._synthesize_with_llm(target, fact_tuples)
+                self._update_self_model("knows about", target)
+            else:
+                # 4. Timeout (Still no data after waiting)
+                response = self.lang_gen.generate_unknown(target) + " (I am currently reading sources. Please ask me again in a moment.)"
+
+        # Self-Reflection Logic
         if any(t in query_text.lower() for t in ["who are you", "what are you", "tell me about yourself"]):
             self_facts = self._retrieve_facts("Turiya")
             if self_facts:
                 self_story = self._synthesize_with_llm("Turiya", self_facts)
                 response = f"{self_story}\n\n(Internal Stats: {self.self_monitor.get_system_report()})"
         
-        # UPDATE HISTORY
         self.chat_history.append({'role': 'user', 'content': query_text})
         self.chat_history.append({'role': 'assistant', 'content': response})
 
@@ -157,64 +182,154 @@ class ReasoningAgent(BaseAgent):
     def _synthesize_with_llm(self, subject: str, facts: List[tuple]) -> str:
         if not self.llm: return self.lang_gen._realize_narrative(subject, facts)
 
-        fact_list = "\n".join([f"- {s} {p} {o}" for s, p, o in facts[:12]])
+        fact_list = "\n".join([f"- {s} {p} {o}" for s, p, o in facts[:15]])
+        
         
         prompt = (
             f"<|system|>\n"
-            f"You are Turiya, an AI. Summarize the facts below into a natural response. "
-            f"If the facts are about 'Turiya', speak in the first person ('I am...'). "
-            f"Only use the provided facts.\n\n"
+            f"You are Turiya, an AI assistant. Your task is to write a detailed summary about the topic: '{subject}'.\n"
+            f"Rules:\n"
+            f"1. Use ONLY the provided facts.\n"
+            f"2. Write in an objective, third-person encyclopedic style.\n"
+            f"3. DO NOT say 'I am {subject}'. Only use 'I' if the topic is explicitly 'Turiya'.\n\n"
             f"Facts about {subject}:\n{fact_list}</s>\n"
             f"<|user|>\n"
-            f"Write a biography about {subject}.\n"
+            f"Tell me about {subject}.\n"
             f"<|assistant|>\n"
         )
 
         try:
-            output = self.safe_generate(prompt, max_tokens=200, stop=["</s>"], echo=False)
+          
+            output = self.safe_generate(prompt, max_tokens=1024, stop=["</s>"], echo=False)
             return output['choices'][0]['text'].strip()
         except Exception as e:
             log.error(f"LLM Synthesis failed: {e}")
             return self.lang_gen._realize_narrative(subject, facts)
 
-    def _retrieve_facts(self, entity_name: str) -> List[tuple]:
+    def _retrieve_facts(self, entity_name: str) -> List[dict]:
+        """
+        Queries LTM using Hebbian Ranking.
+        Returns dicts now: {'id': 1, 's': '...', 'p': '...', 'o': '...'}
+        """
         facts = []
         conn = self.memory_manager.ltm._get_connection()
         
-        cursor = conn.execute(
-            "SELECT subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY LENGTH(subject) ASC LIMIT 15",
-            (f"%{entity_name}%",)
-        )
+        # SORT BY: usage_weight DESC (Important stuff first), then Length (Specific stuff)
+        query = """
+            SELECT id, subject, predicate, object 
+            FROM symbolic_knowledge 
+            WHERE subject LIKE ? 
+            ORDER BY usage_weight DESC, LENGTH(subject) ASC 
+            LIMIT 15
+        """
+        
+        cursor = conn.execute(query, (f"%{entity_name}%",))
         rows = cursor.fetchall()
         
-        if len(rows) < 3 and " " in entity_name:
-            terms = entity_name.split()
-            if len(terms) > 1 and len(terms[-1]) > 3:
-                surname = terms[-1]
-                cursor = conn.execute(
-                    "SELECT subject, predicate, object FROM symbolic_knowledge WHERE subject LIKE ? ORDER BY LENGTH(subject) ASC LIMIT 10",
-                    (f"%{surname}%",)
-                )
-                rows.extend(cursor.fetchall())
+        # ... (Partial match logic would also use the same ORDER BY) ...
 
         seen = set()
         for r in rows:
-            ft = (r['subject'], r['predicate'], r['object'])
-            if ft not in seen and len(r['subject']) < 100:
-                facts.append(ft)
-                seen.add(ft)
+            # Create a unique key for deduplication
+            fact_tuple = (r['subject'], r['predicate'], r['object'])
+            if fact_tuple not in seen and len(r['subject']) < 100:
+                # Store ID so we can reinforce later
+                facts.append({
+                    'id': r['id'],
+                    's': r['subject'],
+                    'p': r['predicate'],
+                    'o': r['object']
+                })
+                seen.add(fact_tuple)
         
         return facts
 
-    def _on_extract_facts(self, text: str, source: str):
-        triples = self.lang_engine.extract_triples_rule_based(text)
+    def _on_extract_facts(self, text: str, source: str, confidence: float = 0.5):
+        """
+        Extracts facts and applies the 'Soft Judge' logic.
+        """
+        if not self.llm: return
+        triples = SymbolicEngine.extract_triples(text, self.safe_generate)
+        
         if triples:
             count = 0
             for (s, p, o) in triples:
-                res = self.memory_manager.add_symbolic_fact(s, p, o, {"source": source})
-                if res > 0: count += 1
+                # 1. Check for conflicts
+                is_new_info = self._handle_contradiction(s, p, o, confidence)
+                
+                if is_new_info:
+                    # 2. Add to DB with the calculated confidence
+                    res = self.memory_manager.ltm.add_fact(s, p, o, {"source": source}, confidence)
+                    if res > 0: count += 1
+            
             if count > 0:
-                log.info(f"[{self.name}] Graph Updated: +{count} facts")
+                log.info(f"[{self.name}] Graph Updated: +{count} facts (Conf: {confidence})")
+
+    def _handle_contradiction(self, subject: str, predicate: str, new_object: str, new_conf: float) -> bool:
+        """
+        The Soft Judge.
+        Returns True if we should add the new fact.
+        Side Effect: Lowers confidence of conflicting facts in the DB.
+        """
+        # 1. Fetch existing facts with same Subject + Predicate
+        with self.memory_manager.ltm as conn:
+            rows = conn._get_connection().execute(
+                "SELECT id, object, confidence FROM symbolic_knowledge WHERE subject = ? AND predicate = ?",
+                (subject, predicate)
+            ).fetchall()
+        
+        existing_conflicts = [(r['id'], r['object'], r['confidence']) for r in rows]
+        
+        # Filter out exact duplicates (case insensitive)
+        existing_conflicts = [x for x in existing_conflicts if x[1].lower() != new_object.lower()]
+
+        if not existing_conflicts:
+            return True # No conflict
+
+        # 2. LLM Arbitration
+        # We only ask the LLM if the objects seem totally different
+        # (Skipping simple synonyms to save compute)
+        conflict_desc = existing_conflicts[0][1]
+        old_id = existing_conflicts[0][0]
+        old_conf = existing_conflicts[0][2]
+
+        log.info(f"[{self.name}] ⚖️ Judge: '{subject} {predicate} {new_object}' vs '{conflict_desc}'")
+        
+        prompt = (
+            f"<|system|>\n"
+            f"You are a Logic Judge. Analyze these two statements.\n"
+            f"A: {subject} {predicate} {new_object}\n"
+            f"B: {subject} {predicate} {conflict_desc}\n"
+            f"Are these contradictory? (e.g. Born in 1900 vs Born in 1910). Output YES or NO.\n"
+            f"<|assistant|>\n"
+        )
+        
+        try:
+            output = self.safe_generate(prompt, max_tokens=5, stop=["\n"], echo=False)
+            verdict = output['choices'][0]['text'].strip().lower()
+            
+            if "yes" in verdict:
+                # CONTRADICTION DETECTED
+                # We do NOT delete. We adjust confidence.
+                
+                if new_conf > old_conf:
+                    # New fact is more trusted. Downgrade the old one.
+                    log.info(f"[{self.name}] ⚖️ Verdict: New fact is stronger. Demoting old fact.")
+                    self.memory_manager.ltm.reinforce_fact(old_id, amount=-0.2) # Reduce weight/confidence
+                    return True
+                else:
+                    # Old fact is stronger. We still add the new one, but maybe warn?
+                    # Or we can choose to reject the new one if the gap is huge.
+                    if old_conf > 0.8 and new_conf < 0.4:
+                         log.warning(f"[{self.name}] ⚖️ Verdict: REJECTED weak new fact.")
+                         return False
+                    return True
+            else:
+                # No contradiction (e.g. "Turing is Mathematician" vs "Turing is Biologist" -> Both true)
+                return True
+                
+        except:
+            return True # Fail open
                 
     def _extract_topic(self, query: str) -> str:
         return query

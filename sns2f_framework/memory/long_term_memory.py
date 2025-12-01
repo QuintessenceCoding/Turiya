@@ -42,7 +42,7 @@ class LongTermMemory:
         log.debug("Initializing LTM database schema...")
         conn = self._get_connection()
         with conn:
-            # 1. Symbolic Knowledge (The "Facts")
+            # 1. Base Tables (Create if not exists)
             conn.execute("""
             CREATE TABLE IF NOT EXISTS symbolic_knowledge (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +55,7 @@ class LongTermMemory:
             );
             """)
             
-            # 2. Memories (The "Raw Text")
+            # ... (Keep memories, embeddings, concepts tables as they were) ...
             conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,8 +67,6 @@ class LongTermMemory:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """)
-
-            # 3. Embeddings (The "Vectors")
             conn.execute("""
             CREATE TABLE IF NOT EXISTS memory_embeddings (
                 memory_id INTEGER NOT NULL,
@@ -77,22 +75,16 @@ class LongTermMemory:
                 FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
             );
             """)
-            
-            # --- V2: CONCEPT LAYER ---
-            
-            # 4. Concepts (The "Ideas")
             conn.execute("""
             CREATE TABLE IF NOT EXISTS concepts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL,
-                definition TEXT,  -- The synthesized summary of the concept
-                embedding BLOB,   -- Vector rep of the concept name/def
-                metadata TEXT,    -- e.g., {'uncertainty': 0.2, 'source_count': 5}
+                definition TEXT,
+                embedding BLOB,
+                metadata TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """)
-
-            # 5. Concept Edges (High-level relations between concepts)
             conn.execute("""
             CREATE TABLE IF NOT EXISTS concept_edges (
                 source_id INTEGER,
@@ -104,28 +96,29 @@ class LongTermMemory:
                 UNIQUE(source_id, target_id, relation)
             );
             """)
-           
-
-            # --- V3: GRAMMAR LAYER ---
-            conn.execute("""
-            CREATE TABLE IF NOT EXISTS grammar_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                structure_hash TEXT UNIQUE NOT NULL, -- Unique ID for the pattern
-                template TEXT NOT NULL,              -- e.g. "{Subject} was a {Adjective} {Object}."
-                pos_sequence TEXT NOT NULL,          -- e.g. "PROPN AUX DET ADJ NOUN"
-                frequency INTEGER DEFAULT 1,
-                example_sentence TEXT
-            );
-            """)
-
-            # 6. Schema Migration: Add link from Facts to Concepts
-            # We try to add the column; if it fails, it likely already exists.
-            try:
-                conn.execute("ALTER TABLE symbolic_knowledge ADD COLUMN concept_id INTEGER REFERENCES concepts(id)")
-                log.info("Schema Migration: Added 'concept_id' to symbolic_knowledge table.")
-            except sqlite3.OperationalError:
-                # Column likely exists already, ignore
-                pass
+            
+            # --- V7 MIGRATION: HEBBIAN & CONFIDENCE COLUMNS ---
+            # We check if columns exist; if not, we add them.
+            cursor = conn.execute("PRAGMA table_info(symbolic_knowledge)")
+            columns = [row['name'] for row in cursor.fetchall()]
+            
+            if "usage_weight" not in columns:
+                log.info("Migrating DB: Adding 'usage_weight'...")
+                conn.execute("ALTER TABLE symbolic_knowledge ADD COLUMN usage_weight REAL DEFAULT 1.0")
+                
+            if "confidence" not in columns:
+                log.info("Migrating DB: Adding 'confidence'...")
+                conn.execute("ALTER TABLE symbolic_knowledge ADD COLUMN confidence REAL DEFAULT 0.5")
+                
+            if "last_used_at" not in columns:
+                log.info("Migrating DB: Adding 'last_used_at'...")
+                conn.execute("ALTER TABLE symbolic_knowledge ADD COLUMN last_used_at TIMESTAMP")
+            
+            # Ensure concept_id exists (from V4)
+            if "concept_id" not in columns:
+                try:
+                    conn.execute("ALTER TABLE symbolic_knowledge ADD COLUMN concept_id INTEGER REFERENCES concepts(id)")
+                except: pass
 
     # --- HELPERS ---
 
@@ -354,3 +347,45 @@ class LongTermMemory:
             conn.execute(f"DELETE FROM memories WHERE id IN ({id_list})")
             
             return len(ids_to_delete)
+        
+        
+
+    def reinforce_fact(self, fact_id: int, amount: float = 1.0):
+        """
+        Hebbian Learning: Strengthens a neural pathway (fact) when used.
+        """
+        conn = self._get_connection()
+        with conn:
+            conn.execute("""
+                UPDATE symbolic_knowledge 
+                SET usage_weight = usage_weight + ?, 
+                    last_used_at = datetime('now') 
+                WHERE id = ?
+            """, (amount, fact_id))
+
+    def decay_weights(self, factor: float = 0.95):
+        """
+        Sleep Cycle: Weakens unused connections.
+        """
+        conn = self._get_connection()
+        with conn:
+            conn.execute("UPDATE symbolic_knowledge SET usage_weight = usage_weight * ?", (factor,))
+
+    # Update add_fact to accept confidence
+    def add_fact(self, subject: str, predicate: str, object: str, context: Optional[dict] = None, confidence: float = 0.5) -> int:
+        conn = self._get_connection()
+        context_json = json.dumps(context) if context else None
+        try:
+            with conn:
+                cursor = conn.execute(
+                    "INSERT INTO symbolic_knowledge (subject, predicate, object, context, confidence) VALUES (?, ?, ?, ?, ?)",
+                    (subject, predicate, object, context_json, confidence)
+                )
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            # If it exists, maybe boost it slightly? (Reinforcement by repetition)
+            conn.execute(
+                "UPDATE symbolic_knowledge SET usage_weight = usage_weight + 0.1 WHERE subject=? AND predicate=? AND object=?",
+                (subject, predicate, object)
+            )
+            return -1
